@@ -1,0 +1,97 @@
+# ========================
+# Java / Maven
+# ========================
+target/
+*.class
+*.jar
+*.war
+*.ear
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+
+# ========================
+# Python（迁移期对照 Python 源码用）
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ========================
+# Node / Frontend
+# ========================
+node_modules/
+frontend/dist/
+frontend/node_modules/
+dist/
+*.local
+
+# ========================
+# IDE / Editor
+# ========================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*.swo
+*~
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# Project specific
+# ========================
+data/
+*.db
+*.sqlite3
+.attachments/
+# 仅忽略根目录导出的临时 SQL；
+# 数据库迁移脚本（如 src/main/resources/db/migration/*.sql）必须入库
+/*.sql
+
+# ========================
+# Environment / Secrets
+# ========================
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# ========================
+# AI / Memory
+# ========================
+.claude/
+.memory/
+.trae/
+.ai-memory/
+
+# ========================
+# Agent（独立 Git 仓库，见 .agents/.git，不在本仓库版本控制内）
+# ========================
+.agents/
