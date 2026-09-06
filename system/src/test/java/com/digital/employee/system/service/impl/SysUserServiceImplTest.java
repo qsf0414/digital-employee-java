@@ -50,18 +50,18 @@ class SysUserServiceImplTest {
 
     @Test
     void getByUsernameShouldReturnUser() {
-        when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(sampleUser);
+        when(userMapper.selectOne(any(LambdaQueryWrapper.class), anyBoolean())).thenReturn(sampleUser);
 
         SysUser result = userService.getByUsername("admin");
 
         assertNotNull(result);
         assertEquals("admin", result.getUsername());
-        verify(userMapper, times(1)).selectOne(any(LambdaQueryWrapper.class));
+        verify(userMapper, times(1)).selectOne(any(LambdaQueryWrapper.class), anyBoolean());
     }
 
     @Test
     void getByUsernameShouldReturnNullWhenNotFound() {
-        when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+        when(userMapper.selectOne(any(LambdaQueryWrapper.class), anyBoolean())).thenReturn(null);
 
         SysUser result = userService.getByUsername("nonexistent");
 

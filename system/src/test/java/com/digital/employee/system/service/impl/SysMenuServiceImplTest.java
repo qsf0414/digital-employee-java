@@ -3,6 +3,7 @@ package com.digital.employee.system.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.digital.employee.system.domain.entity.SysMenu;
 import com.digital.employee.system.mapper.SysMenuMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -24,7 +25,8 @@ class SysMenuServiceImplTest {
     @InjectMocks
     private SysMenuServiceImpl menuService;
 
-    {
+    @BeforeEach
+    void setUp() {
         try {
             setBaseMapper(menuService, menuMapper);
         } catch (Exception e) {

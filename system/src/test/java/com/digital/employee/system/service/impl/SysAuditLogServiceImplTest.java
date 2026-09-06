@@ -3,6 +3,7 @@ package com.digital.employee.system.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.digital.employee.system.domain.entity.SysAuditLog;
 import com.digital.employee.system.mapper.SysAuditLogMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -24,7 +25,8 @@ class SysAuditLogServiceImplTest {
     @InjectMocks
     private SysAuditLogServiceImpl auditLogService;
 
-    {
+    @BeforeEach
+    void setUp() {
         try {
             setBaseMapper(auditLogService, auditLogMapper);
         } catch (Exception e) {

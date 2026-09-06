@@ -8,6 +8,7 @@ import com.digital.employee.system.service.ISysAuditLogService;
 import com.digital.employee.system.service.ISysMenuService;
 import com.digital.employee.system.service.ISysRoleService;
 import com.digital.employee.system.service.ISysUserService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -59,6 +60,8 @@ class AuthControllerTest {
 
     @BeforeEach
     void setUp() {
+        cn.dev33.satoken.context.mock.SaTokenContextMockUtil.setMockContext();
+
         sampleUser = new SysUser();
         sampleUser.setId(1L);
         sampleUser.setUsername("admin");
@@ -72,6 +75,12 @@ class AuthControllerTest {
         sampleRole.setRoleKey("super_admin");
         sampleRole.setRoleName("超级管理员");
         sampleRole.setStatus(1);
+    }
+
+    @AfterEach
+    void tearDown() {
+        cn.dev33.satoken.stp.StpUtil.logout();
+        cn.dev33.satoken.context.mock.SaTokenContextMockUtil.clearContext();
     }
 
     @Test
@@ -352,16 +361,16 @@ class AuthControllerTest {
 
     @Test
     void loginShouldExtractIpFromXForwardedFor() {
-        when(loginRateLimiter.isAllowed(anyString(), anyString())).thenReturn(true);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("captcha:key123")).thenReturn("30");
-        when(userService.getByUsername("admin")).thenReturn(sampleUser);
-        when(passwordEncoder.matches("Test@12345", "$2a$hashed")).thenReturn(true);
+        lenient().when(loginRateLimiter.isAllowed(anyString(), anyString())).thenReturn(true);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(valueOps.get("captcha:key123")).thenReturn("30");
+        lenient().when(userService.getByUsername("admin")).thenReturn(sampleUser);
+        lenient().when(passwordEncoder.matches("Test@12345", "$2a$hashed")).thenReturn(true);
 
         jakarta.servlet.http.HttpServletRequest req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Forwarded-For")).thenReturn("10.0.0.1, 192.168.1.1");
-        when(req.getHeader("X-Real-IP")).thenReturn(null);
-        when(req.getRemoteAddr()).thenReturn("127.0.0.1");
+        lenient().when(req.getHeader("X-Real-IP")).thenReturn(null);
+        lenient().when(req.getRemoteAddr()).thenReturn("127.0.0.1");
 
         com.digital.employee.system.domain.dto.LoginDTO dto = new com.digital.employee.system.domain.dto.LoginDTO();
         dto.setUsername("admin");
@@ -379,16 +388,16 @@ class AuthControllerTest {
 
     @Test
     void loginShouldExtractIpFromXRealIP() {
-        when(loginRateLimiter.isAllowed(anyString(), anyString())).thenReturn(true);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("captcha:key123")).thenReturn("30");
-        when(userService.getByUsername("admin")).thenReturn(sampleUser);
-        when(passwordEncoder.matches("Test@12345", "$2a$hashed")).thenReturn(true);
+        lenient().when(loginRateLimiter.isAllowed(anyString(), anyString())).thenReturn(true);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(valueOps.get("captcha:key123")).thenReturn("30");
+        lenient().when(userService.getByUsername("admin")).thenReturn(sampleUser);
+        lenient().when(passwordEncoder.matches("Test@12345", "$2a$hashed")).thenReturn(true);
 
         jakarta.servlet.http.HttpServletRequest req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Forwarded-For")).thenReturn("unknown");
         when(req.getHeader("X-Real-IP")).thenReturn("10.0.0.2");
-        when(req.getRemoteAddr()).thenReturn("127.0.0.1");
+        lenient().when(req.getRemoteAddr()).thenReturn("127.0.0.1");
 
         com.digital.employee.system.domain.dto.LoginDTO dto = new com.digital.employee.system.domain.dto.LoginDTO();
         dto.setUsername("admin");
