@@ -114,10 +114,12 @@ sequenceDiagram
 ### 2.1 技术栈与基线选型
 
 * **运行环境**：JDK **21**
-* **核心框架**：Spring Boot **4.0.3+**
-* **安全框架**：Sa-Token **1.45.0+**（采用针对 Boot 4 的 `sa-token-spring-boot4-starter` 与 `sa-token-redis-template`）
-* **ORM 框架**：MyBatis-Plus **3.5.17+**（须使用 `mybatis-plus-spring-boot4-starter`，适配 Jakarta 命名空间）
-* **连接池**：HikariCP（Spring Boot 默认，零配置引入，性能优于 Druid）
+* **核心框架**：Spring Boot **4.1.0**（参考官方 Boot 4 示范工程 POM 确认的基线版本）
+* **安全框架**：Sa-Token **1.45.0**（采用针对 Boot 4 的 `sa-token-spring-boot4-starter` 与 `sa-token-redis-template`）
+* **ORM 框架**：MyBatis-Plus **3.5.16**（自 **3.5.13** 起已适配 Boot 4，须使用 `mybatis-plus-spring-boot4-starter`，适配 Jakarta 命名空间）
+* **连接池**：HikariCP（Spring Boot 默认，零配置引入，性能优于 Druid；**不引入 Druid**，保持依赖树精简）
+* **代码生成**：Lombok **1.18.38**（适配高版本 JDK，编译期注解处理走 `maven-compiler-plugin` 的 `annotationProcessorPaths`）
+* **API 文档注解**：`swagger-annotations-jakarta` **2.2.47**（采用 Jakarta 命名空间注解，不引入完整 springdoc 运行时依赖）
 * **密码加密**：Spring Security Crypto `BCryptPasswordEncoder`
 * **存储引擎**：PostgreSQL 15+（JDBC Driver 42.7.x，由 Boot BOM 管理）、Redis 6.2+
 
@@ -131,7 +133,9 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `java.version` | 21 | JDK 固定 21，LTS 版本 |
 | `sa-token.version` | 1.45.0 | Sa-Token 核心 + Redis 集成，统一版本锁定 |
-| `mybatis-plus.version` | 3.5.17 | MyBatis-Plus，须使用 Boot 4 / Jakarta 命名空间适配版 |
+| `mybatis-plus.version` | 3.5.16 | MyBatis-Plus Boot 4 适配版（自 3.5.13 起支持 Boot 4，参考 POM 实测版本） |
+| `lombok.version` | 1.18.38 | Lombok 高版本 JDK 适配版，编译期注解处理 |
+| `swagger-annotations.version` | 2.2.47 | OpenAPI 注解 Jakarta 命名空间版 |
 
 #### 依赖清单
 
@@ -139,165 +143,164 @@ sequenceDiagram
 <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.3</version>
+    <version>4.1.0</version>
     <relativePath/>
 </parent>
+
+<groupId>com.digital.employee</groupId>
+<artifactId>digital-employee-java</artifactId>
+<version>1.0.0-SNAPSHOT</version>
+<packaging>pom</packaging>
+<name>digital-employee-java</name>
+<description>数字员工后端系统：Spring Boot 4 + Sa-Token + MyBatis-Plus</description>
+
+<!-- 聚合模块 -->
+<modules>
+    <module>common</module>
+    <module>system</module>
+    <module>business</module>
+    <module>app</module>
+</modules>
 
 <properties>
     <java.version>21</java.version>
     <sa-token.version>1.45.0</sa-token.version>
-    <mybatis-plus.version>3.5.17</mybatis-plus.version>
+    <mybatis-plus.version>3.5.16</mybatis-plus.version>
+    <lombok.version>1.18.38</lombok.version>
+    <swagger-annotations.version>2.2.47</swagger-annotations.version>
 </properties>
 
-<dependencies>
-    <!-- ==================== Spring Boot 4 核心 ==================== -->
+<dependencyManagement>
+    <dependencies>
+        <!-- 内部模块版本管理（子模块依赖父 POM 统一版本，不写 <version>） -->
+        <dependency>
+            <groupId>com.digital.employee</groupId>
+            <artifactId>common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.digital.employee</groupId>
+            <artifactId>system</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.digital.employee</groupId>
+            <artifactId>business</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
-    <!--
-        spring-boot-starter-webmvc
-        Boot 4 新模块，替代原 spring-boot-starter-web。
-        内嵌 Tomcat + Spring MVC 自动装配，提供 REST Controller 能力。
-    -->
+        <!-- Sa-Token 核心 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot4-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-template</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+
+        <!-- MyBatis-Plus Spring Boot 4 Starter -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+
+        <!-- Swagger/OpenAPI Jakarta -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+            <version>${swagger-annotations.version}</version>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <configuration>
+                <annotationProcessorPaths>
+                    <path>
+                        <groupId>org.projectlombok</groupId>
+                        <artifactId>lombok</artifactId>
+                        <version>${lombok.version}</version>
+                    </path>
+                </annotationProcessorPaths>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
+```
+
+> **依赖管理范式**：根 POM 采用标准聚合根工程范式，所有第三方版本统一定义在 `<dependencyManagement>` 中。子模块（`common`、`system`、`business`、`app`）声明 `sa-token-spring-boot4-starter`、`mybatis-plus-spring-boot4-starter`、`swagger-annotations-jakarta` 等依赖时**一律去除 `<version>` 标签**，完全继承父 POM 版本控制，杜绝版本漂移。
+
+**子模块依赖声明示例（版本由父 POM 统管，禁止写 `<version>`）**：
+
+```xml
+<dependencies>
+    <!-- Boot 4 核心：webmvc 替代 web，aspectj 提供 AOP 代理机制 -->
     <dependency>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
-
-    <!--
-        spring-boot-starter-aspectj
-        Boot 4 AOP Starter。项目使用 Spring AOP 代理机制，
-        用于驱动 Sa-Token 注解鉴权等基于代理的切面，不采用编译期织入。
-    -->
     <dependency>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-aspectj</artifactId>
     </dependency>
 
-    <!-- ==================== Sa-Token 认证鉴权 ==================== -->
-
-    <!--
-        sa-token-spring-boot4-starter
-        Sa-Token 官方 Boot 4 专用 Starter，自动注册 SaInterceptor、
-        StpInterface 等核心 Bean，兼容 Jakarta Servlet API。
-        注意：不要使用旧版 sa-token-spring-boot-starter，该版本基于
-        Spring Boot 3.x 的 javax 命名空间，Boot 4 下无法启动。
-    -->
+    <!-- Sa-Token（Boot 4 专用 Starter） -->
     <dependency>
         <groupId>cn.dev33</groupId>
         <artifactId>sa-token-spring-boot4-starter</artifactId>
-        <version>${sa-token.version}</version>
     </dependency>
-
-    <!--
-        sa-token-redis-template
-        Sa-Token 会话持久化到 Redis 的集成模块，基于 Spring Data RedisTemplate。
-        登录会话（satoken:login:token:xxx）与角色权限缓存（cache:role:perms:xxx）
-        统一写入 Redis，实现分布式会话共享。
-    -->
     <dependency>
         <groupId>cn.dev33</groupId>
         <artifactId>sa-token-redis-template</artifactId>
-        <version>${sa-token.version}</version>
     </dependency>
 
-    <!--
-        commons-pool2
-        Redis 连接池（Lettuce 底层依赖），管理 Redis 长连接复用，
-        避免每次请求新建连接导致性能下降。
-    -->
-    <dependency>
-        <groupId>org.apache.commons</groupId>
-        <artifactId>commons-pool2</artifactId>
-    </dependency>
-
-    <!-- ==================== 数据库层 ==================== -->
-
-    <!--
-        mybatis-plus-spring-boot4-starter (版本 3.5.17+)
-        MyBatis-Plus 官方 Boot 4 专用 Starter，核心要点：
-        ① artifactId 必须是 mybatis-plus-spring-boot4-starter（不是 mybatis-plus-boot-starter），
-           后者基于 javax 命名空间，Boot 4 下启动报 ClassNotFoundException。
-        ② 内置分页插件 PaginationInnerInterceptor，需在 Configuration 中注册：
-           @Bean public MybatisPlusInterceptor mybatisPlusInterceptor() {
-               MybatisPlusInterceptor i = new MybatisPlusInterceptor();
-               i.addInnerInterceptor(new PaginationInnerInterceptor(DbType.POSTGRE_SQL));
-               return i;
-           }
-        ③ 兼容 Jakarta 持久化注解（jakarta.persistence 而非 javax.persistence），
-           实体类使用 @TableName、@TableId、@TableField 等注解无冲突。
-        ④ 若官方 Boot 4 Starter 尚未发布稳定版，可降级使用原生 mybatis-spring-boot-starter
-           + 手动配置，但会失去自动 CRUD 与分页等便利能力。
-    -->
+    <!-- MyBatis-Plus Boot 4 Starter -->
     <dependency>
         <groupId>com.baomidou</groupId>
         <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
-        <version>${mybatis-plus.version}</version>
     </dependency>
 
-    <!--
-        PostgreSQL JDBC Driver
-        版本由 Spring Boot Parent BOM 统一管理（当前 由 Spring Boot Parent BOM 管理），
-        无需显式声明 <version>。
-        scope=runtime：仅运行时需要，编译期不直接引用 JDBC API。
-        application.yml 连接地址格式：
-          url: jdbc:postgresql://localhost:5432/digital_employee
-          driver-class-name: org.postgresql.Driver
-          username/password: 环境变量注入
-    -->
+    <!-- OpenAPI 注解（Jakarta） -->
+    <dependency>
+        <groupId>io.swagger.core.v3</groupId>
+        <artifactId>swagger-annotations-jakarta</artifactId>
+    </dependency>
+
+    <!-- PostgreSQL 驱动（runtime）与 Flyway 方言，版本由 Boot BOM 统管 -->
     <dependency>
         <groupId>org.postgresql</groupId>
         <artifactId>postgresql</artifactId>
         <scope>runtime</scope>
     </dependency>
-
-    <!--
-        flyway-database-postgresql
-        Flyway 数据库迁移引擎的 PostgreSQL 方言支持。
-        表结构 SQL 存放于 src/main/resources/db/migration/（见 §2.5 目录结构）。
-        驱动版本由 Boot Parent BOM 统一管理，无需显式声明 <version>。
-    -->
     <dependency>
         <groupId>org.flywaydb</groupId>
         <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
-    <!--
-        HikariCP（Spring Boot 默认连接池，无需额外引入依赖）
-        选用理由：
-        ① Spring Boot 4 自动装配 HikariCP，引入 spring-boot-starter-jdbc 或
-           mybatis-plus-spring-boot4-starter 后自动生效，零配置即可使用。
-        ② 性能优于 Druid（延迟低、吞吐高），JMH 基准测试领先 20%-40%。
-        ③ 轻量级（约 130KB），无额外监控页面开销，适合生产环境。
-        如需 SQL 监控能力，可通过 Micrometer + Prometheus 指标暴露替代 Druid 监控页。
-    -->
-
-    <!-- ==================== 安全 ==================== -->
-
-    <!--
-        spring-security-crypto
-        仅引入加密模块（BCryptPasswordEncoder），不引入完整 Spring Security 过滤链。
-        用于密码哈希存储：PasswordEncoder.encode() / matches()。
-        由 Boot Parent BOM 管理版本，无需显式声明。
-    -->
+    <!-- 安全加密：仅 spring-security-crypto，不引入完整过滤链 -->
     <dependency>
         <groupId>org.springframework.security</groupId>
         <artifactId>spring-security-crypto</artifactId>
     </dependency>
-
-    <!-- ==================== 工具 ==================== -->
-
-    <!--
-        spring-boot-configuration-processor
-        编译期生成 configuration-metadata.json，IDE 自动提示
-        application.yml 中 sa-token.* / mybatis-plus.* 等自定义配置项。
-        optional=true：不打入最终 Fat Jar。
-    -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-configuration-processor</artifactId>
-        <optional>true</optional>
-    </dependency>
 </dependencies>
 ```
+
+**核心要点说明**：
+
+* **Boot 4 Starter 切分**：`spring-boot-starter-webmvc`（替代原 `spring-boot-starter-web`）提供 MVC Web 能力；AOP 使用 `spring-boot-starter-aspectj`。项目采用 Spring AOP 代理机制驱动 Sa-Token 注解鉴权，不依赖 AspectJ 编译期织入。
+* **Sa-Token 适配**：必须使用 `sa-token-spring-boot4-starter`（Jakarta 命名空间，自动注册 SaInterceptor、StpInterface 等核心 Bean）；旧版 `sa-token-spring-boot-starter` 基于 Boot 3.x 的 javax 命名空间，Boot 4 下无法启动。会话（`satoken:login:token:xxx`）与角色权限缓存（`cache:role:perms:xxx`）经 `sa-token-redis-template` 统一落 Redis（底层 Lettuce，依赖 `commons-pool2` 管理连接复用）。
+* **MyBatis-Plus Boot 4 适配**：① artifactId 必须是 `mybatis-plus-spring-boot4-starter`（不是 `mybatis-plus-boot-starter`，后者基于 javax 命名空间，Boot 4 下启动报 ClassNotFoundException）；② 自 **3.5.13** 起已适配 Boot 4，基线取参考 POM 实测稳定版 **3.5.16**；③ 内置分页插件 `PaginationInnerInterceptor`，需在 Configuration 中注册：`@Bean public MybatisPlusInterceptor mybatisPlusInterceptor()`（`DbType.POSTGRE_SQL`）；④ 兼容 Jakarta 持久化注解（实体类使用 `@TableName`、`@TableId`、`@TableField` 无冲突）。
+* **Lombok 编译期处理**：`maven-compiler-plugin` 通过 `annotationProcessorPaths` 显式声明 Lombok **1.18.38**，适配 JDK 21，避免高版本编译期 AST 解析报错。
+* **API 文档注解**：仅引入 `swagger-annotations-jakarta`（注解声明，Jakarta 命名空间），不引入完整 springdoc 运行时依赖；后续如需在线调试文档再按需引入。
+* **连接池选型**：维持 Boot 默认 **HikariCP**（零额外依赖、延迟/吞吐优于 Druid），参考 POM 中的 Druid 与本项目无关，**不引入**；如需 SQL 监控，通过 Micrometer + Prometheus 暴露指标替代。
 
 #### HikariCP 连接池配置示例（`application.yml`）
 
@@ -391,8 +394,8 @@ public final class RedisConstants {
     /** 登录限流 Key 前缀（IP 维度），完整格式：login:rate:ip:{ip} */
     public static final String LOGIN_RATE_IP = "login:rate:ip:";
 
-    /** 登录限流 Key 前缀（IP+账号维度），完整格式：login:rate:ipacct:{ip}:{username} */
-    public static final String LOGIN_RATE_IP_ACCT = "login:rate:ipacct:";
+    /** 登录限流 Key 前缀（账号维度独立桶），完整格式：login:rate:acct:{username} */
+    public static final String LOGIN_RATE_ACCT = "login:rate:acct:";
 
     /** 角色权限缓存 TTL（小时） */
     public static final long ROLE_PERM_CACHE_TTL_HOURS = 24;
@@ -433,7 +436,7 @@ public class CorsConfigure {
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(allowedOrigins));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
         // 当前采用 Authorization Bearer，不依赖 Cookie，因此关闭 credentials。
         config.setAllowCredentials(false);
@@ -643,7 +646,7 @@ public class StpInterfaceImpl implements StpInterface {
 
 **7. 登录防爆破限流 (`LoginRateLimiter.java`) — Lua 原子脚本**
 
-采用 **双 Key（IP 维度 + IP:账号维度）Redis Lua 脚本**实现原子计数 + 首次计数 TTL 设置。当前策略限制的是“登录尝试次数”，不是“失败次数”。限流逻辑前置于 BCrypt 慢哈希校验之前，防止算力被恶意耗尽。
+采用 **双 Key（IP 维度 + 账号独立桶）Redis Lua 脚本**实现原子计数 + 首次计数 TTL 设置。其中账号桶 `login:rate:acct:{username}` 与 IP 完全解耦，即使攻击者通过分布式代理池轮换 IP，也无法绕过对单个账号的爆破防护。当前策略限制的是“登录尝试次数”，不是“失败次数”。限流逻辑前置于 BCrypt 慢哈希校验之前，防止算力被恶意耗尽。
 
 > **P0 修复说明**：Lua 脚本在 Redis 内部原子完成 `INCR` → 首次计数 `EXPIRE`，避免应用在两条命令之间崩溃导致计数 Key 永久驻留。这里的“5 次”是 15 分钟窗口内最多 5 次登录尝试，第 6 次开始返回 429：
 
@@ -679,7 +682,7 @@ public class LoginRateLimiter {
         if (isBlocked(RedisConstants.LOGIN_RATE_IP + ip)) {
             return false;
         }
-        return !isBlocked(RedisConstants.LOGIN_RATE_IP_ACCT + ip + ":" + username);
+        return !isBlocked(RedisConstants.LOGIN_RATE_ACCT + username);
     }
 
     private boolean isBlocked(String key) {
@@ -695,7 +698,7 @@ public class LoginRateLimiter {
 
 > **调用位置**：在 `AuthController.login()` 方法最前部调用 `loginRateLimiter.isAllowed(ip, username)`，返回 `false` 时直接响应 `429 TOO_MANY_REQUESTS`，**不进入密码校验流程**。BCrypt `matches()` 单次耗时约 80-120ms，若被恶意遍历将严重消耗 CPU 线程池。
 >
-> **单测注意事项（短路求值语义）**：`isAllowed()` 内部由 `if (isBlocked(IP桶))` 短路返回 `false`，以 `return !isBlocked(IPACCT桶)` 收尾。正常情况下单次登录请求会**同时递增** IP 桶与 IP:账号桶（双桶联合防御）；但**当 IP 桶已经命中限流（`isBlocked(IP桶)==true`）时，Java 短路求值会直接返回，第二个 IP:账号桶不会被调用、计数不会递增**。这与"IP 达限则账号维度一并封禁"的设计意图一致。编写单测时须覆盖该短路分支：构造 IP 桶超限场景，断言 `isBlocked(IPACCT桶)` 未被调用、其计数保持原值——切勿在随后用例中误以为两个桶计数始终同步。
+> **单测注意事项（短路求值语义）**：`isAllowed()` 内部由 `if (isBlocked(IP桶))` 短路返回 `false`，以 `return !isBlocked(账号桶)` 收尾。正常情况下单次登录请求会**同时递增** IP 桶与账号桶（双桶联合防御）；但**当 IP 桶已经命中限流（`isBlocked(IP桶)==true`）时，Java 短路求值会直接返回，账号桶不会被调用、计数不会递增**。这与"IP 达限则账号维度一并封禁"的设计意图一致。编写单测时须覆盖该短路分支：构造 IP 桶超限场景，断言 `isBlocked(账号桶)` 未被调用、其计数保持原值——切勿在随后用例中误以为两个桶计数始终同步。此外须单测**分布式代理池场景**：同一账号、不同 IP 连续尝试（每个 IP 均未达限），账号桶计数持续递增直至 429，验证账号独立桶对单账号爆破的有效性。
 
 **8. 全局异常细分映射 (`GlobalExceptionHandler.java`)**
 
@@ -735,23 +738,53 @@ public class GlobalExceptionHandler {
 
 **9. 密码安全规范**
 
+> **P1 修正说明**：废弃静态工具类 `com.digital.employee.common.utils.PasswordEncoder`（其类名与 Spring Security 的 `PasswordEncoder` 接口重名易混淆），改为在配置类中声明 `@Bean`，由 Spring 容器统一管理。Service 通过构造器注入 `PasswordEncoder`，便于单测时用 Mock 替换：
+
 ```java
-package com.digital.employee.common.utils;
+package com.digital.employee.common.config;
 
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
-public final class PasswordEncoder {
+@Configuration
+public class PasswordConfig {
 
-    private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+```
 
-    private PasswordEncoder() {}
+```java
+package com.digital.employee.system.service.impl;
 
-    public static String encode(String rawPassword) {
-        return ENCODER.encode(rawPassword);
+import com.digital.employee.system.domain.entity.SysUser;
+import com.digital.employee.system.mapper.SysUserMapper;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+@Service
+public class SysUserServiceImpl {
+
+    private final SysUserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+
+    public SysUserServiceImpl(SysUserMapper userMapper, PasswordEncoder passwordEncoder) {
+        this.userMapper = userMapper;
+        this.passwordEncoder = passwordEncoder;
     }
 
-    public static boolean matches(String rawPassword, String passwordHash) {
-        return ENCODER.matches(rawPassword, passwordHash);
+    public void createUser(SysUser user, String rawPassword) {
+        // 存储：统一使用 BCrypt 加密，禁止明文或 MD5/SHA1
+        user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        userMapper.insert(user);
+    }
+
+    public boolean verifyPassword(String rawPassword, String passwordHash) {
+        return passwordEncoder.matches(rawPassword, passwordHash);
     }
 }
 ```
@@ -760,7 +793,7 @@ public final class PasswordEncoder {
 
 * 存储：统一使用 BCrypt 加密，禁止明文或 MD5/SHA1。
 * 复杂度：密码长度 ≥ 8 位，需包含大写字母、小写字母、数字中的至少两类。
-* 防暴力破解：登录接口采用 `IP + 账号` 维度限流，15 分钟窗口内最多 5 次登录尝试，第 6 次开始限流 15 分钟。
+* 防暴力破解：登录接口采用 **IP 维度 + 账号维度独立桶**（`login:rate:ip:{ip}` / `login:rate:acct:{username}`）双桶限流，15 分钟窗口内最多 5 次登录尝试，第 6 次开始限流 15 分钟；账号桶与 IP 解耦，可有效防御分布式代理池对单个账号的爆破。
 
 ### 2.5 后端工程目录结构
 
@@ -981,7 +1014,7 @@ ON CONFLICT DO NOTHING;
 
 1. 检查 `INITIAL_ADMIN_USERNAME` 与 `INITIAL_ADMIN_PASSWORD` 是否存在。
 2. 若不存在管理员账号则创建；若已存在则不覆盖密码。
-3. 密码使用 `BCryptPasswordEncoder` 在应用运行时计算，不在 SQL 中预置。
+3. 密码使用容器托管的 `PasswordEncoder` Bean（`BCryptPasswordEncoder`）在应用运行时计算，不在 SQL 中预置。
 4. 新账号 `must_change_password=true`，首次登录后强制修改密码。
 5. 初始化器只在事务中执行，并记录审计日志。
 
@@ -1223,6 +1256,8 @@ Authorization: Bearer <token>
 
 > **设计规则**：`menus` 仅返回当前用户可访问的 M（目录）和 C（菜单页面）树结构，供动态路由渲染；**menus 节点内部绝不携带 permissions 数组**；所有的按钮与操作权限码，统一平铺在根节点的 `permissions` 字符串列表中。
 
+> **菜单加载约束（杜绝 N+1 SQL）**：`menus` 树组装必须采用 **"单次查询全量当前权限菜单 + 内存递归/Map 转树"** 模式——后端仅执行一次 SQL（`sys_role_menu` JOIN `sys_menu`，过滤 `visible=1`，按 `sort_order` 排序）取出当前角色可见的全部 M/C 菜单，随后在内存中建立 `parentId → List<SysMenu>` 的 Map 索引，一次递归完成树形组装；**严禁在遍历菜单节点时逐条查询数据库（N+1 SQL）**。F（按钮）类型不进 `menus` 树，其权限码统一平铺在根节点 `permissions` 中。
+
 前端 `permission.ts` Store 解析 `menus` 递归生成路由。`permissions` 为根节点的扁平字符串列表（`List<String>`），供 `v-hasPermi` 指令与 `checkPermi` 函数使用。
 
 ### 4.4 动态路由解析与守卫 (`src/router/guard.ts`)
@@ -1293,6 +1328,52 @@ router.beforeEach(async (to, from, next) => {
 | menus | 仅 M/C 树；不在节点内部重复携带 permissions |
 | permissions | 根节点扁平 `string[]` |
 | 分页 | 统一 page/pageSize 与固定响应结构 |
+| 验证码 | `GET /api/v1/auth/captcha` 获取算术验证码；登录请求必须携带 captchaKey / captchaCode |
+| 健康探针 | `GET /api/v1/health` 免鉴权返回服务健康状态 |
+
+**补充接口契约：`GET /api/v1/auth/captcha`（验证码）**
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {
+    "captchaKey": "5f0a2b1c-9e4d-4c6a-9b7e-3d5f8a2c1b90",
+    "captchaImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...",
+    "captchaType": "MATH"
+  }
+}
+```
+
+* 验证码结果仅存于 Redis：`captcha:{captchaKey}`，TTL 5 分钟，一次性使用。
+* 登录请求回传 `captchaKey` 与 `captchaCode`，后端校验通过后立即删除该 Key。
+* 失败响应：`code=CAPTCHA_INVALID`（验证码错误）或 `code=CAPTCHA_EXPIRED`（过期/已使用）。
+
+```text
+POST /api/v1/auth/login
+{
+  "username": "admin",
+  "password": "******",
+  "captchaKey": "5f0a2b1c-9e4d-4c6a-9b7e-3d5f8a2c1b90",
+  "captchaCode": "12"
+}
+```
+
+**补充接口契约：`GET /api/v1/health`（健康探针）**
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {
+    "status": "UP",
+    "timestamp": "2026-09-06T10:30:00+08:00"
+  }
+}
+```
+
+* 免鉴权访问（已在 `SaTokenConfigure` 白名单中），供负载均衡 / K8s liveness 与 readiness 探针使用。
+* 仅返回进程存活与依赖就绪状态，不暴露数据库地址、版本等敏感信息。
 
 ### 5.2 事务边界
 
@@ -1321,7 +1402,7 @@ router.beforeEach(async (to, from, next) => {
 
 | 阶段 | 核心目标 | 交付物 |
 | :--- | :--- | :--- |
-| **Phase 0** | 基础工程、数据库与 API 契约冻结 | Spring Boot 4.0.3 POM 依赖调通、5 张表 DDL 执行脚本（正确外键顺序）、预置角色/菜单、API Contract Freeze、`application-dev.yml` / `application-test.yml` / `application-prod.yml` 环境配置模板 |
+| **Phase 0** | 基础工程、数据库与 API 契约冻结 | Spring Boot 4.1.0 聚合根 POM 依赖调通、5 张表 DDL 执行脚本（正确外键顺序）、预置角色/菜单、API Contract Freeze、`application-dev.yml` / `application-test.yml` / `application-prod.yml` 环境配置模板 |
 | **Phase 1** | 后端鉴权闭环 | `SaTokenConfigure`、`CorsConfigure`、`StpInterfaceImpl`（含角色级共享缓存 + 所有权校验锁 + 版本二次校验）组装完成，`LoginRateLimiter`（Lua 原子限流）就绪，`@SaCheckPermission` 与全局异常映射单元测试通过，BCrypt 密码工具就绪 |
 | **Phase 2** | 系统管理 CRUD | 用户管理、角色菜单分配接口与 `/api/v1/auth/me`（动态菜单树 + 权限集合）完成开发并验证，权限缓存失效联动测试 |
 | **Phase 3** | 前端骨架与动态路由 | Vite 初始化、Axios 拦截器（含业务错误码处理）、Pinia 模块、动态路由追加逻辑（`router/guard.ts` + `import.meta.glob`）、`v-hasPermi` 指令与 `checkPermi` 工具函数联调 |
@@ -1361,5 +1442,5 @@ router.beforeEach(async (to, from, next) => {
 | :--- | :--- | :--- |
 | **被踢下线延迟感知** | Sa-Token 基于 HTTP 请求拦截检测会话状态，已打开的浏览器标签页不会实时弹窗。只有用户在被踢后发起下一次请求时，才触发 401 `SESSION_REPLACED` 弹窗提示 | 产品体验 |
 | **`v-hasPermi` 不支持运行时热切** | 自定义指令仅在 `mounted` 阶段执行，权限变更后不会自动刷新 DOM。需要刷新页面或强制重建组件才生效。复杂循环场景（`el-table-column` 操作列等）须使用 `checkPermi` + `v-if` 替代指令 | 权限变更场景 |
-| **MyBatis-Plus Boot 4 适配** | 使用 `mybatis-plus-spring-boot4-starter` 3.5.17+，构建时通过 Maven 锁定版本并执行启动/CRUD/分页集成测试；若未来升级版本，必须单独回归验证 | 构建与启动 |
-| **CORS 白名单** | `CorsConfigure` 中的 `allowedOriginPatterns` 需在部署时根据实际域名修改，开发环境使用 `localhost:*` | 部署配置 |
+| **MyBatis-Plus Boot 4 适配** | 使用 `mybatis-plus-spring-boot4-starter` 3.5.16（自 3.5.13 起已适配 Boot 4），构建时通过 Maven 锁定版本并执行启动/CRUD/分页集成测试；若未来升级版本，必须单独回归验证 | 构建与启动 |
+| **CORS 白名单** | `CorsConfigure` 统一使用 `setAllowedOrigins`（精确匹配），Origin 由 `cors.allowed-origins` 配置注入；生产环境须显式列出真实域名，禁止 `*` 通配。如确需通配，须显式改用 `setAllowedOriginPatterns`，二者不得混用 | 部署配置 |
