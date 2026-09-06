@@ -1,7 +1,7 @@
 # digital-employee-java 架构开发规范与实施规划
 
 > **项目名称**：`digital-employee-java`（后端单体） + `digital-employee-web`（前端）
-> **文档版本**：v2.2
+> **文档版本**：v2.3
 > **生效日期**：2026-09-06
 > **基准调整**：全面采纳 **Spring Boot 4.x** 标准生态，适配 `sa-token-spring-boot4-starter` 与 Boot 4 全新依赖体系（`webmvc` 与 `aspectj` 模块切分）。
 
@@ -60,6 +60,7 @@ sequenceDiagram
         BE->>Redis: 删除旧 Token 会话
     end
     BE->>Redis: 写入新 Token (timeout=7d, active-timeout=30min)
+    BE->>Redis: 加载权限写入 cache:user:perms:xxx
     BE-->>FE: 返回 Bearer Token
     FE->>FE: 存入 Pinia UserStore + Storage
     FE-->>U: 跳转主页，动态路由注入
@@ -98,6 +99,8 @@ sequenceDiagram
     end
 ```
 
+> **产品侧已知限制**：Sa-Token 的"被顶下线"检测基于 HTTP 请求拦截机制。浏览器已打开的标签页**不会实时弹出下线提示**，只有在该标签页发起下一次 HTTP 请求时，拦截器捕获到 `SESSION_REPLACED` 后才会弹窗。若需实时推送下线通知，需引入 WebSocket / SSE 全双工通道，当前版本不纳入。
+
 ---
 
 ## 2. 后端技术规范（`digital-employee-java`）
@@ -107,6 +110,8 @@ sequenceDiagram
 * **运行环境**：JDK 17 / 21 / 25
 * **核心框架**：Spring Boot **4.0.3+**
 * **安全框架**：Sa-Token **1.45.0+**（采用针对 Boot 4 的 `sa-token-spring-boot4-starter` 与 `sa-token-redis-template`）
+* **ORM 框架**：MyBatis-Plus **3.5.9+**（适配 Boot 4 / Jakarta 命名空间）
+* **密码加密**：Spring Security Crypto `BCryptPasswordEncoder`
 * **存储引擎**：PostgreSQL 15+、Redis 6.2+
 
 ### 2.2 Maven 核心依赖清单（Spring Boot 4 规范）
@@ -124,6 +129,7 @@ sequenceDiagram
 <properties>
     <java.version>17</java.version>
     <sa-token.version>1.45.0</sa-token.version>
+    <mybatis-plus.version>3.5.9</mybatis-plus.version>
 </properties>
 
 <dependencies>
@@ -159,6 +165,26 @@ sequenceDiagram
         <artifactId>commons-pool2</artifactId>
     </dependency>
 
+    <!-- MyBatis-Plus (适配 Boot 4 / Jakarta) -->
+    <dependency>
+        <groupId>com.baomidou</groupId>
+        <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
+        <version>${mybatis-plus.version}</version>
+    </dependency>
+
+    <!-- PostgreSQL 驱动 -->
+    <dependency>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+
+    <!-- Spring Security Crypto (BCryptPasswordEncoder) -->
+    <dependency>
+        <groupId>org.springframework.security</groupId>
+        <artifactId>spring-security-crypto</artifactId>
+    </dependency>
+
     <!-- 编译期配置元数据处理器 -->
     <dependency>
         <groupId>org.springframework.boot</groupId>
@@ -183,9 +209,77 @@ sa-token:
   is-log: false           # 生产关闭冗余日志
 ```
 
+> **产品侧约束**：`is-concurrent: false` 意味着同一账号在新终端登录后，旧终端的其他浏览器标签页将在下一次请求时被强制踢下线。产品与测试团队需提前知晓此行为，避免误报为缺陷。
+
 ### 2.4 后端核心代码落地
 
-**1. 拦截器路由配置 (`SaTokenConfigure.java`)**
+**1. 统一信封 (`Result.java`)**
+
+```java
+package com.digital.employee.common.core;
+
+import lombok.Data;
+
+@Data
+public class Result<T> {
+    private String code;
+    private String message;
+    private T data;
+
+    public static <T> Result<T> success(T data) {
+        Result<T> r = new Result<>();
+        r.code = "OK";
+        r.message = "success";
+        r.data = data;
+        return r;
+    }
+
+    public static <T> Result<T> success() {
+        return success(null);
+    }
+
+    public static <T> Result<T> fail(String code, String message) {
+        Result<T> r = new Result<>();
+        r.code = code;
+        r.message = message;
+        return r;
+    }
+}
+```
+
+**2. CORS 跨域配置 (`CorsConfigure.java`)**
+
+```java
+package com.digital.employee.system.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
+
+import java.util.List;
+
+@Configuration
+public class CorsConfigure {
+
+    @Bean
+    public CorsFilter corsFilter() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOriginPatterns(List.of("http://localhost:*", "https://your-domain.com"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return new CorsFilter(source);
+    }
+}
+```
+
+**3. 拦截器路由配置 (`SaTokenConfigure.java`)**
 
 分工明确：拦截器负责"要不要登录"，AOP 注解负责"有没有权限"。
 
@@ -216,9 +310,11 @@ public class SaTokenConfigure implements WebMvcConfigurer {
 }
 ```
 
-**2. 权限数据源与超管旁路 (`StpInterfaceImpl.java`)**
+> **接口版本管理约束**：当前统一使用 `/api/v1/**` 前缀。未来引入 v2 版本时，在 `SaRouter` 中追加 `/api/v2/**` 匹配规则；旧版本接口保持兼容，新功能仅在 v2 路径下开发，直至 v1 下线。
 
-严禁直接将 `loginId` 强转为 `Long`（Redis 反序列化底层通常为 String）；通过返回 `*:*:*` 统一旁路 `super_admin`：
+**4. 权限数据源与超管旁路 — 含缓存读取 (`StpInterfaceImpl.java`)**
+
+严禁直接将 `loginId` 强转为 `Long`（Redis 反序列化底层通常为 String）；通过返回 `*:*:*` 统一旁路 `super_admin`。权限数据通过 Redis 缓存加速读取，采用 **Cache-Aside** 模式：
 
 ```java
 package com.digital.employee.system.satoken;
@@ -226,18 +322,26 @@ package com.digital.employee.system.satoken;
 import cn.dev33.satoken.stp.StpInterface;
 import com.digital.employee.system.service.SysMenuService;
 import com.digital.employee.system.service.SysRoleService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class StpInterfaceImpl implements StpInterface {
 
+    private static final String PERM_CACHE_PREFIX = "cache:user:perms:";
+    private static final long PERM_CACHE_TTL_HOURS = 24;
+
     private final SysMenuService menuService;
     private final SysRoleService roleService;
+    private final StringRedisTemplate redisTemplate;
 
-    public StpInterfaceImpl(SysMenuService menuService, SysRoleService roleService) {
+    public StpInterfaceImpl(SysMenuService menuService, SysRoleService roleService,
+                            StringRedisTemplate redisTemplate) {
         this.menuService = menuService;
         this.roleService = roleService;
+        this.redisTemplate = redisTemplate;
     }
 
     @Override
@@ -245,11 +349,22 @@ public class StpInterfaceImpl implements StpInterface {
         Long userId = Long.valueOf(loginId.toString());
         List<String> roles = getRoleList(loginId, loginType);
 
-        // 超管全量放行
         if (roles.contains("super_admin")) {
             return List.of("*:*:*");
         }
-        return menuService.listPermsByUserId(userId);
+
+        String cacheKey = PERM_CACHE_PREFIX + userId;
+        List<String> cached = redisTemplate.opsForList().range(cacheKey, 0, -1);
+        if (cached != null && !cached.isEmpty()) {
+            return cached;
+        }
+
+        List<String> perms = menuService.listPermsByUserId(userId);
+        if (!perms.isEmpty()) {
+            redisTemplate.opsForList().leftPushAll(cacheKey, perms);
+            redisTemplate.expire(cacheKey, PERM_CACHE_TTL_HOURS, TimeUnit.HOURS);
+        }
+        return perms;
     }
 
     @Override
@@ -257,10 +372,26 @@ public class StpInterfaceImpl implements StpInterface {
         Long userId = Long.valueOf(loginId.toString());
         return roleService.listRoleKeysByUserId(userId);
     }
+
+    public void clearPermCache(Long userId) {
+        redisTemplate.delete(PERM_CACHE_PREFIX + userId);
+    }
 }
 ```
 
-**3. 全局异常细分映射 (`GlobalExceptionHandler.java`)**
+**5. 权限缓存维护规则**
+
+采用 **Cache-Aside（旁路缓存）** 模式，确保权限变更后缓存一致性：
+
+| 触发时机 | 操作 | 说明 |
+| :--- | :--- | :--- |
+| 用户登录 | 写入 `cache:user:perms:{userId}` | 登录时加载权限集合并缓存 |
+| 用户登出 / 被挤下线 | 删除 `cache:user:perms:{userId}` | 清理无效缓存 |
+| 修改用户角色分配 | 删除 `cache:user:perms:{userId}` | 角色变更影响权限 |
+| 修改角色菜单权限 | 批量删除相关用户缓存 | 需反查受影响的用户列表 |
+| 兜底 TTL | 24 小时自动过期 | 防止极端场景下缓存脏数据永久残留 |
+
+**6. 全局异常细分映射 (`GlobalExceptionHandler.java`)**
 
 将常规过期（`UNAUTHORIZED`）与被挤下线（`SESSION_REPLACED`）区分响应，便于前端针对性展示提示：
 
@@ -296,6 +427,35 @@ public class GlobalExceptionHandler {
 }
 ```
 
+**7. 密码安全规范**
+
+```java
+package com.digital.employee.common.utils;
+
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
+public final class PasswordEncoder {
+
+    private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
+
+    private PasswordEncoder() {}
+
+    public static String encode(String rawPassword) {
+        return ENCODER.encode(rawPassword);
+    }
+
+    public static boolean matches(String rawPassword, String passwordHash) {
+        return ENCODER.matches(rawPassword, passwordHash);
+    }
+}
+```
+
+**密码策略约束**：
+
+* 存储：统一使用 BCrypt 加密，禁止明文或 MD5/SHA1。
+* 复杂度：密码长度 ≥ 8 位，需包含大写字母、小写字母、数字中的至少两类。
+* 防暴力破解：登录接口采用 `IP + 账号` 维度限流，连续 5 次失败后锁定 15 分钟。
+
 ### 2.5 后端工程目录结构
 
 采用聚合单体工程规范划分模块：
@@ -311,7 +471,7 @@ digital-employee-java/                        # 父工程 POM
 │       └── utils/                            # 加密、脱敏、上下文工具
 ├── system/                                   # RBAC 权限与系统核心
 │   └── src/main/java/com/digital/employee/system/
-│       ├── config/                           # SaTokenConfigure
+│       ├── config/                           # SaTokenConfigure, CorsConfigure
 │       ├── satoken/                          # StpInterfaceImpl
 │       ├── domain/                           # 实体 (SysUser, SysRole, SysMenu) 与 DTO/VO
 │       ├── mapper/                           # MyBatis-Plus 数据仓储
@@ -328,7 +488,8 @@ digital-employee-java/                        # 父工程 POM
         └── resources/
             ├── application.yml               # 通用配置
             ├── application-dev.yml           # 开发环境配置
-            └── db/migration/                 # PostgreSQL 脚本
+            ├── application-prod.yml          # 生产环境配置
+            └── db/migration/                 # PostgreSQL 脚本 (Flyway)
 ```
 
 ---
@@ -352,6 +513,8 @@ CREATE TABLE sys_user (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_sys_user_status ON sys_user(status);
+CREATE INDEX idx_sys_user_phone ON sys_user(phone);
 
 -- 2. 角色表
 CREATE TABLE sys_role (
@@ -376,6 +539,8 @@ CREATE TABLE sys_menu (
     visible SMALLINT NOT NULL DEFAULT 1,        -- 1=显示, 0=隐藏
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_sys_menu_parent ON sys_menu(parent_id);
+CREATE INDEX idx_sys_menu_perms ON sys_menu(perms);
 
 -- 4. 用户-角色关联表
 CREATE TABLE sys_user_role (
@@ -454,6 +619,38 @@ erDiagram
 | `admin:agent:manage` | Agent 管理 |
 | `admin:agent:readonly` | Agent 查看 |
 | `admin:observability:log:view` | 可观测性日志查看 |
+
+### 3.4 初始化 SQL 脚本
+
+```sql
+-- 初始角色
+INSERT INTO sys_role (role_key, role_name, status)
+VALUES
+    ('super_admin', '超级管理员', 1),
+    ('admin', '管理员', 1),
+    ('user', '普通用户', 1);
+
+-- 初始管理员用户 (密码: Admin@123456, BCrypt 加密)
+INSERT INTO sys_user (username, password_hash, nickname, status)
+VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '超级管理员', 1);
+
+-- admin 用户分配 super_admin 角色
+INSERT INTO sys_user_role (user_id, role_id)
+VALUES (1, (SELECT id FROM sys_role WHERE role_key = 'super_admin'));
+
+-- 初始菜单与权限 (示例：系统管理目录 + 用户管理页面 + 用户管理权限码)
+INSERT INTO sys_menu (id, parent_id, title, menu_type, path, component, perms, icon, sort_order)
+VALUES
+    (1, 0, '系统管理', 'M', '/system', NULL, NULL, 'setting', 1),
+    (2, 1, '用户管理', 'C', '/system/user', 'system/user/UserManage', 'admin:user:readonly', 'user', 1),
+    (3, 2, '用户新增', 'F', NULL, NULL, 'admin:user:manage', NULL, 1),
+    (4, 2, '用户编辑', 'F', NULL, NULL, 'admin:user:manage', NULL, 2),
+    (5, 2, '用户删除', 'F', NULL, NULL, 'admin:user:manage', NULL, 3);
+
+-- super_admin 角色拥有全部菜单权限
+INSERT INTO sys_role_menu (role_id, menu_id)
+SELECT (SELECT id FROM sys_role WHERE role_key = 'super_admin'), id FROM sys_menu;
+```
 
 ---
 
@@ -542,7 +739,14 @@ request.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 request.interceptors.response.use(
-  (response: AxiosResponse<IApiResponse>) => response.data,
+  (response: AxiosResponse<IApiResponse>) => {
+    const { data } = response;
+    if (data && data.code !== 'OK') {
+      ElMessage.error(data.message || '请求失败');
+      return Promise.reject(new Error(data.message));
+    }
+    return data;
+  },
   (error) => {
     const { response } = error;
     if (response) {
@@ -612,14 +816,89 @@ export const setupPermissionDirective = (app: App): void => {
 };
 ```
 
+> **`v-permission` 局限性**：当前指令仅在组件 `mounted` 阶段执行 DOM 校验。运行时权限动态变更（如管理员在后台修改角色后）已挂载的按钮**不会自动刷新**。常规解法：权限变更后调用 `window.location.reload()` 强制刷新页面，或通过 Vue `key` 强制重建组件。
+
+### 4.3 `/api/v1/auth/me` 接口契约
+
+登录成功后前端调用此接口获取当前用户信息、角色与权限集合，用于动态路由生成与按钮级鉴权。
+
+**请求**
+
+```
+GET /api/v1/auth/me
+Authorization: Bearer <token>
+```
+
+**响应**
+
+```json
+{
+  "code": "OK",
+  "message": "success",
+  "data": {
+    "userId": 1,
+    "username": "admin",
+    "nickname": "超级管理员",
+    "roles": ["super_admin"],
+    "permissions": ["*:*:*"],
+    "menus": [
+      {
+        "id": 1,
+        "parentId": 0,
+        "title": "系统管理",
+        "menuType": "M",
+        "path": "/system",
+        "icon": "setting",
+        "children": [
+          {
+            "id": 2,
+            "parentId": 1,
+            "title": "用户管理",
+            "menuType": "C",
+            "path": "/system/user",
+            "component": "system/user/UserManage",
+            "icon": "user",
+            "permissions": ["admin:user:readonly", "admin:user:manage"],
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+前端 `permission.ts` Store 解析 `menus` 递归生成路由，`permissions` 数组供 `v-permission` 指令与 `use-auth.ts` 使用。
+
 ---
 
 ## 5. 项目分阶段实施与交付计划
 
 | 阶段 | 核心目标 | 交付物 |
 | :--- | :--- | :--- |
-| **Phase 0** | 基础工程与环境基线就绪 | Spring Boot 4.0.3 POM 依赖调通、5 张表 DDL 执行脚本、预置初始角色与权限码 |
-| **Phase 1** | 后端鉴权闭环 | `SaTokenConfigure`、`StpInterfaceImpl` 组装完成，`@SaCheckPermission` 与全局异常映射单元测试通过 |
-| **Phase 2** | 系统管理 CRUD | 用户管理、角色菜单分配接口与 `/api/v1/auth/me`（动态菜单树）完成开发并验证 |
-| **Phase 3** | 前端骨架与动态路由 | Vite 初始化、Axios 拦截器、Pinia 模块、动态路由追加逻辑以及 `v-permission` 调试 |
-| **Phase 4** | 系统联调与安全加固 | 单会话多标签页被踢联动测试、登录防暴力破解、接口压测与联调上线 |
+| **Phase 0** | 基础工程与环境基线就绪 | Spring Boot 4.0.3 POM 依赖调通、5 张表 DDL 执行脚本、预置初始角色与权限码、`application-dev.yml` / `application-prod.yml` 环境配置模板 |
+| **Phase 1** | 后端鉴权闭环 | `SaTokenConfigure`、`CorsConfigure`、`StpInterfaceImpl`（含缓存读写）组装完成，`@SaCheckPermission` 与全局异常映射单元测试通过，BCrypt 密码工具就绪 |
+| **Phase 2** | 系统管理 CRUD | 用户管理、角色菜单分配接口与 `/api/v1/auth/me`（动态菜单树 + 权限集合）完成开发并验证，权限缓存失效联动测试 |
+| **Phase 3** | 前端骨架与动态路由 | Vite 初始化、Axios 拦截器（含业务错误码处理）、Pinia 模块、动态路由追加逻辑以及 `v-permission` 调试 |
+| **Phase 4** | 系统联调与安全加固 | 单会话多标签页被踢联动测试、登录限流防暴力破解、接口压测与联调上线 |
+
+### 环境与规范约束
+
+| 类别 | 规范 |
+| :--- | :--- |
+| **环境配置** | 三套配置文件：`application-dev.yml`（本地开发）、`application-test.yml`（测试）、`application-prod.yml`（生产），敏感配置走环境变量注入 |
+| **单元测试** | 鉴权链路（`StpInterfaceImpl`、异常映射）须覆盖，覆盖率 ≥ 70% |
+| **集成测试** | Phase 2 完成后，对 `/api/v1/auth/me`、角色菜单分配联动做端到端验证 |
+| **日志规范** | 生产环境 `sa-token.is-log: false`；业务日志使用 SLF4J + Logback，禁止 `System.out`；登录行为（成功/失败/被踢）须记录审计日志 |
+| **Redis Key 规范** | 所有 Redis Key 统一设置 TTL，禁止永久 Key；会话 Key 由 Sa-Token 管理，业务缓存 Key 前缀统一为 `cache:user:perms:{userId}` |
+
+---
+
+## 6. 已知限制与产品约束
+
+| 项目 | 说明 | 影响范围 |
+| :--- | :--- | :--- |
+| **被踢下线延迟感知** | Sa-Token 基于 HTTP 请求拦截检测会话状态，已打开的浏览器标签页不会实时弹窗。只有用户在被踢后发起下一次请求时，才触发 401 `SESSION_REPLACED` 弹窗提示 | 产品体验 |
+| **`v-permission` 不支持运行时热切** | 自定义指令仅在 `mounted` 阶段执行，权限变更后不会自动刷新 DOM。需要刷新页面或强制重建组件才生效 | 权限变更场景 |
+| **MyBatis-Plus Boot 4 适配** | Boot 4 为极新版本，需确认 MyBatis-Plus 官方 `mybatis-plus-spring-boot4-starter` 对 Jakarta 命名空间的完整支持，建议锁定稳定版 | 构建与启动 |
+| **CORS 白名单** | `CorsConfigure` 中的 `allowedOriginPatterns` 需在部署时根据实际域名修改，开发环境使用 `localhost:*` | 部署配置 |
