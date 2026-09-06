@@ -1,9 +1,9 @@
 # digital-employee-java 架构开发规范与实施规划
 
 > **项目名称**：`digital-employee-java`（后端单体） + `digital-employee-web`（前端）
-> **文档版本**：v2.5
+> **文档版本**：v2.7
 > **生效日期**：2026-09-06
-> **基准调整**：全面采纳 **Spring Boot 4.x** 标准生态，适配 `sa-token-spring-boot4-starter` 与 Boot 4 全新依赖体系（`webmvc` 与 `aspectj` 模块切分）。业务模型收敛为**"用户仅绑定单角色"的 4 表 RBAC 模型**（废弃 `sys_user_role` 关联表，`role_id` 直接内嵌 `sys_user`），权限缓存升级为**角色维度共享缓存**（`cache:role:perms:{roleKey}:{ver}`），消除多角色组合爆炸与用户级并集缓存混乱。
+> **基准调整**：全面采纳 **Spring Boot 4.x** 标准生态，适配 `sa-token-spring-boot4-starter` 与 Boot 4 全新依赖体系（`webmvc` 与 `aspectj` 模块切分）。业务模型收敛为**"用户仅绑定单角色"的 RBAC 核心 4 表模型**（废弃 `sys_user_role` 关联表，`role_id` 直接内嵌 `sys_user`），权限缓存升级为**角色维度共享缓存 + 带所有权校验的 Redis 互斥锁防击穿**（`cache:role:perms:{roleKey}:{ver}`），登录限流采用 **Lua 原子脚本**保证计数与 TTL 原子执行，`role_key` 列增加 PostgreSQL CHECK 约束防止 Redis 命名空间冒号污染。
 
 ---
 
@@ -55,7 +55,7 @@ sequenceDiagram
 
     U->>FE: 输入账号密码 + 验证码
     FE->>BE: POST /api/v1/auth/login
-    BE->>Redis: LoginRateLimiter 双 Key 限流检查 (IP + IP:account)
+    BE->>Redis: LoginRateLimiter Lua 原子脚本 (INCR + 首包 EXPIRE)
     alt 触发限流阈值
         Redis-->>BE: count > 5
         BE-->>FE: 429 TOO_MANY_REQUESTS
@@ -116,14 +116,14 @@ sequenceDiagram
 * **运行环境**：JDK **21**
 * **核心框架**：Spring Boot **4.0.3+**
 * **安全框架**：Sa-Token **1.45.0+**（采用针对 Boot 4 的 `sa-token-spring-boot4-starter` 与 `sa-token-redis-template`）
-* **ORM 框架**：MyBatis-Plus **3.5.9+**（须使用 `mybatis-plus-spring-boot4-starter`，适配 Jakarta 命名空间）
+* **ORM 框架**：MyBatis-Plus **3.5.17+**（须使用 `mybatis-plus-spring-boot4-starter`，适配 Jakarta 命名空间）
 * **连接池**：HikariCP（Spring Boot 默认，零配置引入，性能优于 Druid）
 * **密码加密**：Spring Security Crypto `BCryptPasswordEncoder`
 * **存储引擎**：PostgreSQL 15+（JDBC Driver 42.7.x，由 Boot BOM 管理）、Redis 6.2+
 
 ### 2.2 Maven 核心依赖清单（Spring Boot 4 规范）
 
-> **Boot 4 变化提示**：旧版的 `spring-boot-starter-web` 与 `spring-boot-starter-aop` 已废弃，必须替换为 `spring-boot-starter-webmvc` 与 `spring-boot-starter-aspectj`。
+> **Boot 4 变化提示**：Boot 4 使用 `spring-boot-starter-webmvc` 提供 MVC Web 能力；AOP 使用 `spring-boot-starter-aspectj`。项目采用 Spring AOP 代理机制，不依赖 AspectJ 编译期织入。
 
 #### 版本管理（properties）
 
@@ -131,7 +131,7 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `java.version` | 21 | JDK 固定 21，LTS 版本 |
 | `sa-token.version` | 1.45.0 | Sa-Token 核心 + Redis 集成，统一版本锁定 |
-| `mybatis-plus.version` | 3.5.9 | MyBatis-Plus，须使用 Boot 4 / Jakarta 命名空间适配版 |
+| `mybatis-plus.version` | 3.5.17 | MyBatis-Plus，须使用 Boot 4 / Jakarta 命名空间适配版 |
 
 #### 依赖清单
 
@@ -146,7 +146,7 @@ sequenceDiagram
 <properties>
     <java.version>21</java.version>
     <sa-token.version>1.45.0</sa-token.version>
-    <mybatis-plus.version>3.5.9</mybatis-plus.version>
+    <mybatis-plus.version>3.5.17</mybatis-plus.version>
 </properties>
 
 <dependencies>
@@ -164,9 +164,8 @@ sequenceDiagram
 
     <!--
         spring-boot-starter-aspectj
-        Boot 4 新模块，替代原 spring-boot-starter-aop。
-        提供 AspectJ 编译时织入，保证 @SaCheckPermission 等注解鉴权生效。
-        若仍使用旧 starter-aop，Boot 4 启动时会因类路径冲突报错。
+        Boot 4 AOP Starter。项目使用 Spring AOP 代理机制，
+        用于驱动 Sa-Token 注解鉴权等基于代理的切面，不采用编译期织入。
     -->
     <dependency>
         <groupId>org.springframework.boot</groupId>
@@ -213,7 +212,7 @@ sequenceDiagram
     <!-- ==================== 数据库层 ==================== -->
 
     <!--
-        mybatis-plus-spring-boot4-starter (版本 3.5.9+)
+        mybatis-plus-spring-boot4-starter (版本 3.5.17+)
         MyBatis-Plus 官方 Boot 4 专用 Starter，核心要点：
         ① artifactId 必须是 mybatis-plus-spring-boot4-starter（不是 mybatis-plus-boot-starter），
            后者基于 javax 命名空间，Boot 4 下启动报 ClassNotFoundException。
@@ -236,7 +235,7 @@ sequenceDiagram
 
     <!--
         PostgreSQL JDBC Driver
-        版本由 Spring Boot Parent BOM 统一管理（当前 Boot 4.0.3 对应 42.7.x），
+        版本由 Spring Boot Parent BOM 统一管理（当前 由 Spring Boot Parent BOM 管理），
         无需显式声明 <version>。
         scope=runtime：仅运行时需要，编译期不直接引用 JDBC API。
         application.yml 连接地址格式：
@@ -413,10 +412,15 @@ public class CorsConfigure {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("http://localhost:*", "https://your-domain.com"));
+        // 生产环境必须通过配置注入明确 Origin，禁止使用任意通配。
+        config.setAllowedOrigins(List.of(
+                "http://localhost:5173",
+                "http://localhost:4173"
+        ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
+        // 当前采用 Authorization Bearer，不依赖 Cookie，因此关闭 credentials。
+        config.setAllowCredentials(false);
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -459,9 +463,11 @@ public class SaTokenConfigure implements WebMvcConfigurer {
 
 > **接口版本管理约束**：当前统一使用 `/api/v1/**` 前缀。未来引入 v2 版本时，在 `SaRouter` 中追加 `/api/v2/**` 匹配规则；旧版本接口保持兼容，新功能仅在 v2 路径下开发，直至 v1 下线。
 
-**5. 权限数据源与超管旁路 — 单角色版本号共享缓存 (`StpInterfaceImpl.java`)**
+**5. 权限数据源与超管旁路 — 单角色版本号共享缓存 + 互斥锁防击穿 (`StpInterfaceImpl.java`)**
 
-收敛单角色模型后，用户鉴权退化为"查角色 → 读该角色版本缓存"两步。严禁直接将 `loginId` 强转为 `Long`（Redis 反序列化底层通常为 String）；通过返回 `*:*:*` 统一旁路 `super_admin`。同角色的所有用户共享同一份 `cache:role:perms:{roleKey}:{ver}` 缓存，命中率接近 100%：
+收敛单角色模型后，用户鉴权退化为"查角色 → 读该角色版本缓存"两步。严禁直接将 `loginId` 强转为 `Long`（Redis 反序列化底层通常为 String）；通过返回 `*:*:*` 统一旁路 `super_admin`。同角色的所有用户共享同一份 `cache:role:perms:{roleKey}:{ver}` 缓存，命中率接近 100%。
+
+> **P0 修复说明**：当管理员修改某角色权限后 `roleVersion` 递增，该角色的数千个在线用户在下一秒几乎同时请求 → 缓存全部失效 → 全部击穿到 DB。引入 `SETNX` 互斥锁（5s 自动过期防死锁），确保**仅 1 个线程查 DB 回填缓存，其余线程自旋等待命中缓存**，彻底压制 DB 瞬时尖刺：
 
 ```java
 package com.digital.employee.system.satoken;
@@ -477,13 +483,22 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class StpInterfaceImpl implements StpInterface {
 
-    /** 空权限占位符：防止无权限角色频繁穿透查库 */
     private static final String EMPTY_FLAG = ":empty:";
+    private static final String LOCK_PREFIX = "lock:role:perms:";
+    private static final long LOCK_TIMEOUT_SECONDS = 5;
+    private static final long SPIN_SLEEP_MS = 80;
+    private static final int MAX_RETRY = 40;
+
+    /** Redis Lua：仅当当前值等于本线程 owner token 时才允许释放锁。 */
+    private static final String RELEASE_LOCK_LUA =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+            "return redis.call('del', KEYS[1]) else return 0 end";
 
     private final ISysMenuService menuService;
     private final ISysRoleService roleService;
@@ -504,32 +519,87 @@ public class StpInterfaceImpl implements StpInterface {
             return List.of();
         }
 
-        // 1. 超管通配旁路
         if ("super_admin".equals(role.getRoleKey())) {
             return List.of("*:*:*");
         }
 
-        // 2. 单角色版本缓存（全局所有同角色用户共享此缓存）
         String roleKey = role.getRoleKey();
-        String ver = redisTemplate.opsForValue().get(RedisConstants.ROLE_VERSION_PREFIX + roleKey);
-        ver = (ver != null) ? ver : "0";
-        String cacheKey = RedisConstants.ROLE_PERM_CACHE_PREFIX + roleKey + ":" + ver;
 
-        Set<String> cached = redisTemplate.opsForSet().members(cacheKey);
-        if (cached != null && !cached.isEmpty()) {
-            return cached.contains(EMPTY_FLAG) ? List.of() : new ArrayList<>(cached);
+        for (int retry = 0; retry < MAX_RETRY; retry++) {
+            String ver = getRoleVersion(roleKey);
+            String cacheKey = buildCacheKey(roleKey, ver);
+            Set<String> cached = redisTemplate.opsForSet().members(cacheKey);
+            if (cached != null && !cached.isEmpty()) {
+                return toPermissions(cached);
+            }
+
+            // 锁绑定到具体版本，避免旧版本锁阻塞新版本缓存回填。
+            String lockKey = LOCK_PREFIX + roleKey + ":" + ver;
+            String ownerToken = UUID.randomUUID().toString();
+            Boolean acquired = redisTemplate.opsForValue()
+                    .setIfAbsent(lockKey, ownerToken, LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            if (Boolean.TRUE.equals(acquired)) {
+                try {
+                    // P0：拿到锁后必须重新读取版本，防止“读版本 → 等锁 → 版本已变更”。
+                    String lockedVersion = getRoleVersion(roleKey);
+                    if (!ver.equals(lockedVersion)) {
+                        continue;
+                    }
+
+                    cached = redisTemplate.opsForSet().members(cacheKey);
+                    if (cached != null && !cached.isEmpty()) {
+                        return toPermissions(cached);
+                    }
+
+                    List<String> dbPerms = menuService.selectPermsByRoleId(role.getId());
+
+                    // DB 查询期间可能发生权限变更，绝不能把旧权限写进当前版本缓存。
+                    String latestVersion = getRoleVersion(roleKey);
+                    if (!ver.equals(latestVersion)) {
+                        continue;
+                    }
+
+                    if (dbPerms.isEmpty()) {
+                        redisTemplate.opsForSet().add(cacheKey, EMPTY_FLAG);
+                    } else {
+                        redisTemplate.opsForSet().add(cacheKey, dbPerms.toArray(new String[0]));
+                    }
+                    redisTemplate.expire(cacheKey, RedisConstants.ROLE_PERM_CACHE_TTL_HOURS, TimeUnit.HOURS);
+                    return dbPerms;
+                } finally {
+                    // P0：只能删除自己持有的锁，避免锁过期后误删后来者的锁。
+                    redisTemplate.execute(
+                            new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+                                    RELEASE_LOCK_LUA, Long.class),
+                            List.of(lockKey), ownerToken);
+                }
+            }
+
+            try {
+                Thread.sleep(SPIN_SLEEP_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return List.of();
+            }
         }
 
-        // 3. 缓存未命中 -> 查 DB 并回填，空权限写占位符防穿透
-        List<String> dbPerms = menuService.selectPermsByRoleId(role.getId());
-        if (dbPerms.isEmpty()) {
-            redisTemplate.opsForSet().add(cacheKey, EMPTY_FLAG);
-        } else {
-            redisTemplate.opsForSet().add(cacheKey, dbPerms.toArray(new String[0]));
-        }
-        redisTemplate.expire(cacheKey, RedisConstants.ROLE_PERM_CACHE_TTL_HOURS, TimeUnit.HOURS);
+        // Redis 异常、锁长期争用或版本持续变化时，不允许无限递归。
+        throw new IllegalStateException("角色权限缓存回填重试次数超限");
+    }
 
-        return dbPerms;
+    private String getRoleVersion(String roleKey) {
+        String version = redisTemplate.opsForValue()
+                .get(RedisConstants.ROLE_VERSION_PREFIX + roleKey);
+        return version != null ? version : "0";
+    }
+
+    private String buildCacheKey(String roleKey, String version) {
+        return RedisConstants.ROLE_PERM_CACHE_PREFIX + roleKey + ":" + version;
+    }
+
+    private List<String> toPermissions(Set<String> cached) {
+        return cached.contains(EMPTY_FLAG) ? List.of() : new ArrayList<>(cached);
     }
 
     @Override
@@ -554,23 +624,38 @@ public class StpInterfaceImpl implements StpInterface {
 
 > **性能优势**：相比"修改角色后遍历删除所有用户缓存 Key"，版本号机制在角色绑定成千上万用户时避免了 Redis 批量删除的性能风险，单次 `INCR` 即可完成全量失效；且角色级共享缓存将 Key 数量从"用户数"压缩到"角色数"，内存开销与缓存命中率同时达到最优。
 
-**7. 登录防爆破限流 (`LoginRateLimiter.java`)**
+**7. 登录防爆破限流 (`LoginRateLimiter.java`) — Lua 原子脚本**
 
-采用 **双 Key（IP 维度 + IP:账号维度）Redis INCR + EXPIRE** 实现，限流逻辑前置于 BCrypt 慢哈希校验之前，防止算力被恶意耗尽：
+采用 **双 Key（IP 维度 + IP:账号维度）Redis Lua 脚本**实现原子计数 + 首次计数 TTL 设置。当前策略限制的是“登录尝试次数”，不是“失败次数”。限流逻辑前置于 BCrypt 慢哈希校验之前，防止算力被恶意耗尽。
+
+> **P0 修复说明**：Lua 脚本在 Redis 内部原子完成 `INCR` → 首次计数 `EXPIRE`，避免应用在两条命令之间崩溃导致计数 Key 永久驻留。这里的“5 次”是 15 分钟窗口内最多 5 次登录尝试，第 6 次开始返回 429：
 
 ```java
 package com.digital.employee.common.redis;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
-import java.util.concurrent.TimeUnit;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.stereotype.Component;
+
+import java.util.Collections;
 
 @Component
 public class LoginRateLimiter {
 
     private final StringRedisTemplate redisTemplate;
+    private final DefaultRedisScript<Long> rateLimitScript;
 
     public LoginRateLimiter(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
+        this.rateLimitScript = new DefaultRedisScript<>();
+        this.rateLimitScript.setResultType(Long.class);
+        this.rateLimitScript.setScriptText(
+            "local current = redis.call('incr', KEYS[1]); " +
+            "if tonumber(current) == 1 then " +
+            "    redis.call('expire', KEYS[1], ARGV[1]); " +
+            "end; " +
+            "return current;"
+        );
     }
 
     public boolean isAllowed(String ip, String username) {
@@ -581,10 +666,11 @@ public class LoginRateLimiter {
     }
 
     private boolean isBlocked(String key) {
-        Long count = redisTemplate.opsForValue().increment(key);
-        if (count != null && count == 1) {
-            redisTemplate.expire(key, RedisConstants.LOGIN_RATE_WINDOW_SECONDS, TimeUnit.SECONDS);
-        }
+        Long count = redisTemplate.execute(
+            rateLimitScript,
+            Collections.singletonList(key),
+            String.valueOf(RedisConstants.LOGIN_RATE_WINDOW_SECONDS)
+        );
         return count != null && count > RedisConstants.LOGIN_RATE_MAX_ATTEMPTS;
     }
 }
@@ -655,7 +741,7 @@ public final class PasswordEncoder {
 
 * 存储：统一使用 BCrypt 加密，禁止明文或 MD5/SHA1。
 * 复杂度：密码长度 ≥ 8 位，需包含大写字母、小写字母、数字中的至少两类。
-* 防暴力破解：登录接口采用 `IP + 账号` 维度限流，连续 5 次失败后锁定 15 分钟。
+* 防暴力破解：登录接口采用 `IP + 账号` 维度限流，15 分钟窗口内最多 5 次登录尝试，第 6 次开始限流 15 分钟。
 
 ### 2.5 后端工程目录结构
 
@@ -695,51 +781,52 @@ digital-employee-java/                        # 父工程 POM
 
 ---
 
-## 3. RBAC 数据模型（单轨 4 表模型）
+## 3. RBAC 数据模型（核心 4 表 + 独立审计日志表，共 5 表结构）
 
-将页面路由、菜单展示与后端接口权限统一收敛到 `sys_menu` 表，角色分配时只需勾选单一菜单树，避免配置脱节。业务模型采用**"用户仅绑定单角色"**约束：`sys_user` 直接内嵌 `role_id` 外键，废弃多对多关联表 `sys_user_role`，彻底消除多角色笛卡尔积授权冲突与用户级权限并集计算的复杂度。
+将页面路由、菜单展示与后端接口权限统一收敛到 `sys_menu` 表，角色分配时只需勾选单一菜单树，避免配置脱节。业务模型采用**"用户仅绑定单角色"**约束：`sys_user` 直接内嵌 `role_id` 外键，废弃多对多关联表 `sys_user_role`，彻底消除多角色笛卡尔积授权冲突与用户级权限并集计算的复杂度。审计日志表 `sys_audit_log` 为等保合规独立表，不参与 RBAC 核心鉴权链路。
 
 ### 3.1 DDL 设计（PostgreSQL 规范）
 
+> **执行顺序约束**：先创建 `sys_role`，再创建引用它的 `sys_user`，避免 PostgreSQL 在建表阶段因外键目标表不存在而失败。`phone` 已通过 UNIQUE 约束建立唯一索引，不再重复创建普通索引。
+
 ```sql
--- 1. 用户表（直接内嵌 role_id，单用户绑定单角色）
+-- 1. 角色表（先于 sys_user 创建）
+CREATE TABLE sys_role (
+    id BIGSERIAL PRIMARY KEY,
+    role_key VARCHAR(64) NOT NULL UNIQUE CHECK (role_key ~ '^[a-z0-9_]+$'),
+    role_name VARCHAR(64) NOT NULL,
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (0, 1)),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. 用户表（直接内嵌 role_id，单用户绑定单角色）
 CREATE TABLE sys_user (
     id BIGSERIAL PRIMARY KEY,
     username VARCHAR(64) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     nickname VARCHAR(64),
     phone VARCHAR(20) UNIQUE,
-    role_id BIGINT NOT NULL REFERENCES sys_role(id),   -- 单角色外键约束
-    status SMALLINT NOT NULL DEFAULT 1,                 -- 1=正常, 0=禁用
+    role_id BIGINT NOT NULL REFERENCES sys_role(id),
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (0, 1)),
     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_sys_user_role_id ON sys_user(role_id);
 CREATE INDEX idx_sys_user_status ON sys_user(status);
-CREATE INDEX idx_sys_user_phone ON sys_user(phone);
 
--- 2. 角色表
-CREATE TABLE sys_role (
-    id BIGSERIAL PRIMARY KEY,
-    role_key VARCHAR(64) NOT NULL UNIQUE,       -- super_admin / admin / user
-    role_name VARCHAR(64) NOT NULL,
-    status SMALLINT NOT NULL DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- 3. 菜单与权限统一表 (承载目录、路由页面、按钮与接口操作)
+-- 3. 菜单与权限统一表
 CREATE TABLE sys_menu (
     id BIGSERIAL PRIMARY KEY,
     parent_id BIGINT NOT NULL DEFAULT 0,
     title VARCHAR(64) NOT NULL,
-    menu_type CHAR(1) NOT NULL,                 -- M=目录, C=菜单页面, F=按钮与操作
-    path VARCHAR(128),                          -- 前端路由 (仅 M/C)
-    component VARCHAR(128),                     -- 组件路径 (仅 C)
-    perms VARCHAR(128),                         -- 权限标识 (如 admin:user:manage)
+    menu_type CHAR(1) NOT NULL CHECK (menu_type IN ('M', 'C', 'F')),
+    path VARCHAR(128),
+    component VARCHAR(128),
+    perms VARCHAR(128),
     icon VARCHAR(64),
     sort_order INT NOT NULL DEFAULT 0,
-    visible SMALLINT NOT NULL DEFAULT 1,        -- 1=显示, 0=隐藏
+    visible SMALLINT NOT NULL DEFAULT 1 CHECK (visible IN (0, 1)),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_sys_menu_parent ON sys_menu(parent_id);
@@ -753,7 +840,7 @@ CREATE TABLE sys_role_menu (
 );
 CREATE INDEX idx_role_menu_mid ON sys_role_menu(menu_id);
 
--- 5. 审计日志表（等保合规，非 RBAC 核心表）
+-- 5. 审计日志表（非 RBAC 核心表）
 CREATE TABLE sys_audit_log (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT,
@@ -765,7 +852,7 @@ CREATE TABLE sys_audit_log (
     method VARCHAR(10),
     url VARCHAR(256),
     duration_ms INT,
-    status SMALLINT NOT NULL DEFAULT 1,         -- 1=成功, 0=失败
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (0, 1)),
     error_msg TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -836,32 +923,43 @@ erDiagram
 
 ### 3.4 初始化 SQL 脚本
 
+> **安全约束**：禁止在 Git、Flyway SQL 或文档中写入固定管理员明文密码或可复用 BCrypt 哈希。角色、菜单等静态种子可由 Flyway 初始化；首个管理员账号由启动初始化器读取环境变量 `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD` 创建，并在数据库中写入 BCrypt 哈希，同时设置 `must_change_password=true`。初始化成功后应立即删除或禁用对应环境变量。
+
 ```sql
--- 初始角色
+-- 初始角色：幂等写入
 INSERT INTO sys_role (role_key, role_name, status)
 VALUES
     ('super_admin', '超级管理员', 1),
     ('admin', '管理员', 1),
-    ('user', '普通用户', 1);
+    ('user', '普通用户', 1)
+ON CONFLICT (role_key) DO NOTHING;
 
--- 初始管理员用户 (密码: Admin@123456, BCrypt 加密)，直接绑定 super_admin 单角色
-INSERT INTO sys_user (username, password_hash, nickname, role_id, status)
-VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '超级管理员',
-        (SELECT id FROM sys_role WHERE role_key = 'super_admin'), 1);
-
--- 初始菜单与权限 (示例：系统管理目录 + 用户管理页面 + 用户管理权限码)
+-- 初始菜单与权限：示例
 INSERT INTO sys_menu (id, parent_id, title, menu_type, path, component, perms, icon, sort_order)
 VALUES
     (1, 0, '系统管理', 'M', '/system', NULL, NULL, 'setting', 1),
     (2, 1, '用户管理', 'C', '/system/user', 'system/user/UserManage', 'admin:user:readonly', 'user', 1),
     (3, 2, '用户新增', 'F', NULL, NULL, 'admin:user:manage', NULL, 1),
     (4, 2, '用户编辑', 'F', NULL, NULL, 'admin:user:manage', NULL, 2),
-    (5, 2, '用户删除', 'F', NULL, NULL, 'admin:user:manage', NULL, 3);
+    (5, 2, '用户删除', 'F', NULL, NULL, 'admin:user:manage', NULL, 3)
+ON CONFLICT (id) DO NOTHING;
 
--- super_admin 角色拥有全部菜单权限
+-- super_admin 拥有全部菜单权限；通过唯一主键避免重复。
 INSERT INTO sys_role_menu (role_id, menu_id)
-SELECT (SELECT id FROM sys_role WHERE role_key = 'super_admin'), id FROM sys_menu;
+SELECT r.id, m.id
+FROM sys_role r
+CROSS JOIN sys_menu m
+WHERE r.role_key = 'super_admin'
+ON CONFLICT DO NOTHING;
 ```
+
+**管理员首次启动初始化流程**：
+
+1. 检查 `INITIAL_ADMIN_USERNAME` 与 `INITIAL_ADMIN_PASSWORD` 是否存在。
+2. 若不存在管理员账号则创建；若已存在则不覆盖密码。
+3. 密码使用 `BCryptPasswordEncoder` 在应用运行时计算，不在 SQL 中预置。
+4. 新账号 `must_change_password=true`，首次登录后强制修改密码。
+5. 初始化器只在事务中执行，并记录审计日志。
 
 ---
 
@@ -1153,17 +1251,59 @@ router.beforeEach(async (to, from, next) => {
 
 ---
 
-## 5. 项目分阶段实施与交付计划
+## 5. API 契约、事务与安全基线
+
+### 5.1 API Contract Freeze
+
+在 Phase 0 结束前冻结以下前后端契约，后续实现不得自行改变字段或语义：
+
+| 项目 | 约束 |
+| :--- | :--- |
+| URL 前缀 | 统一 `/api/v1/**` |
+| 成功响应 | `Result<T>`，`code=OK` |
+| 认证失败 | HTTP 401 + `UNAUTHORIZED` 或 `SESSION_REPLACED` |
+| 权限不足 | HTTP 403 + `PERMISSION_DENIED` |
+| 登录限流 | HTTP 429 + `TOO_MANY_REQUESTS` |
+| Token | `Authorization: Bearer <token>`，opaque token |
+| 当前用户 | `GET /api/v1/auth/me` 返回 user、roles、permissions、menus |
+| menus | 仅 M/C 树；不在节点内部重复携带 permissions |
+| permissions | 根节点扁平 `string[]` |
+| 分页 | 统一 page/pageSize 与固定响应结构 |
+
+### 5.2 事务边界
+
+- 用户创建、角色创建、角色菜单授权修改必须使用事务。
+- **修改角色菜单权限时，数据库事务提交成功后再执行 `INCR sys:role:version:{roleKey}`**；禁止在事务回滚前提前让缓存版本失效。
+- 角色状态变更、用户角色变更必须同步考虑当前 Token 的权限读取语义，并在测试中验证。
+- 审计日志写入不得阻塞核心业务；如采用异步日志，必须保证关键安全事件至少落盘一次。
+
+### 5.3 Token 与前端存储安全
+
+当前采用 Bearer Token，不使用 Cookie 鉴权，因此 CORS 不需要 `allowCredentials=true`。前端 Storage 仍属于 XSS 可读取区域，必须同时启用生产 CSP、避免 `v-html` 注入、依赖安全扫描与统一请求封装。若未来需要进一步提高 Token 防窃取能力，可改为 HttpOnly + Secure + SameSite Cookie，但届时必须同步修改 CORS、CSRF 与 Sa-Token Token 读取策略，不能只改前端。
+
+### 5.4 动态路由安全
+
+`sys_menu.component` 不是任意可执行代码，只允许匹配前端预先编译的组件注册表。推荐使用 `import.meta.glob('@/views/**/*.vue')` 生成白名单映射；数据库值仅作为 Key，不允许直接拼接任意 import 路径。
+
+### 5.5 Redis 故障策略
+
+- Redis 是会话真相源：Redis 不可用时，不得把本地缓存误当作登录状态。
+- 角色权限缓存不可用时，应优先失败并记录告警，而不是绕过鉴权直接放行。
+- 限流 Redis 不可用时，生产环境默认采用 **fail-closed**，防止登录接口失去爆破防护；如业务必须可用，需由部署配置显式切换并记录安全告警。
+
+---
+
+## 6. 项目分阶段实施与交付计划
 
 | 阶段 | 核心目标 | 交付物 |
 | :--- | :--- | :--- |
-| **Phase 0** | 基础工程与环境基线就绪 | Spring Boot 4.0.3 POM 依赖调通、5 张表 DDL 执行脚本、预置初始角色与权限码、`application-dev.yml` / `application-prod.yml` 环境配置模板 |
-| **Phase 1** | 后端鉴权闭环 | `SaTokenConfigure`、`CorsConfigure`、`StpInterfaceImpl`（含缓存读写）组装完成，`@SaCheckPermission` 与全局异常映射单元测试通过，BCrypt 密码工具就绪 |
+| **Phase 0** | 基础工程、数据库与 API 契约冻结 | Spring Boot 4.0.3 POM 依赖调通、5 张表 DDL 执行脚本（正确外键顺序）、预置角色/菜单、API Contract Freeze、`application-dev.yml` / `application-test.yml` / `application-prod.yml` 环境配置模板 |
+| **Phase 1** | 后端鉴权闭环 | `SaTokenConfigure`、`CorsConfigure`、`StpInterfaceImpl`（含角色级共享缓存 + 所有权校验锁 + 版本二次校验）组装完成，`LoginRateLimiter`（Lua 原子限流）就绪，`@SaCheckPermission` 与全局异常映射单元测试通过，BCrypt 密码工具就绪 |
 | **Phase 2** | 系统管理 CRUD | 用户管理、角色菜单分配接口与 `/api/v1/auth/me`（动态菜单树 + 权限集合）完成开发并验证，权限缓存失效联动测试 |
 | **Phase 3** | 前端骨架与动态路由 | Vite 初始化、Axios 拦截器（含业务错误码处理）、Pinia 模块、动态路由追加逻辑（`router/guard.ts` + `import.meta.glob`）、`v-hasPermi` 指令与 `checkPermi` 工具函数联调 |
-| **Phase 4** | 系统联调与安全加固 | 单会话多标签页被踢联动测试、登录限流防暴力破解、接口压测与联调上线 |
+| **Phase 4** | 系统联调与安全加固 | 单会话多标签页被踢联动测试、Lua 原子限流器压测验证、缓存击穿互斥锁高并发场景测试、接口压测与联调上线 |
 
-### 环境与规范约束
+### 6.1 环境与规范约束
 
 | 类别 | 规范 |
 | :--- | :--- |
@@ -1171,15 +1311,31 @@ router.beforeEach(async (to, from, next) => {
 | **单元测试** | 鉴权链路（`StpInterfaceImpl`、异常映射）须覆盖，覆盖率 ≥ 70% |
 | **集成测试** | Phase 2 完成后，对 `/api/v1/auth/me`、角色菜单分配联动做端到端验证 |
 | **日志规范** | 生产环境 `sa-token.is-log: false`；业务日志使用 SLF4J + Logback，禁止 `System.out`；登录行为（成功/失败/被踢）须记录审计日志 |
-| **Redis Key 规范** | 所有 Redis Key 统一设置 TTL，禁止永久 Key；会话 Key 由 Sa-Token 管理；业务缓存 Key 前缀统一由 `RedisConstants` 常量类管理，格式：`cache:role:perms:{roleKey}:{roleVersion}`（角色共享）、`sys:role:version:{roleKey}`、`login:rate:ip:{ip}`、`login:rate:ipacct:{ip}:{username}` |
+| **Redis Key 规范** | 临时状态与缓存 Key 必须设置 TTL；逻辑持久 Key 可按设计不设置 TTL。会话 Key 由 Sa-Token 管理；角色版本号 `sys:role:version:{roleKey}` 属于逻辑版本状态，允许永久存在；登录限流 Key 必须带 15 分钟 TTL；业务缓存 Key 统一由 `RedisConstants` 管理 |
 
 ---
 
-## 6. 已知限制与产品约束
+## 6.2 核心验收标准
+
+| 场景 | 验收标准 |
+| :--- | :--- |
+| 登录 | 正确密码成功；错误密码不泄露账号存在性；15 分钟内第 6 次尝试返回 429 |
+| 单会话 | 同账号新登录后旧 Token 下一次请求返回 `SESSION_REPLACED` |
+| 权限缓存 | 同角色用户共享缓存；角色权限变更后新版本生效；旧版本不会覆盖新版本 |
+| 锁安全 | 锁过期后旧线程不得删除新线程持有的锁；持续争用不得无限递归 |
+| 角色权限并发 | 角色权限变更与并发鉴权同时发生时，不允许返回已确认失效版本的缓存权限 |
+| RBAC | 一个用户只能绑定一个角色；角色菜单授权事务提交后版本递增 |
+| 动态路由 | 数据库 component 只能命中前端 glob 白名单，未知 component 必须拒绝 |
+| CORS | 生产只允许显式配置的 Origin，Bearer 模式不依赖 Cookie credentials |
+| 初始化 | Git/SQL 中不存在固定管理员密码；管理员密码仅由环境变量首次注入并运行时 BCrypt |
+
+---
+
+## 7. 已知限制与产品约束
 
 | 项目 | 说明 | 影响范围 |
 | :--- | :--- | :--- |
 | **被踢下线延迟感知** | Sa-Token 基于 HTTP 请求拦截检测会话状态，已打开的浏览器标签页不会实时弹窗。只有用户在被踢后发起下一次请求时，才触发 401 `SESSION_REPLACED` 弹窗提示 | 产品体验 |
 | **`v-hasPermi` 不支持运行时热切** | 自定义指令仅在 `mounted` 阶段执行，权限变更后不会自动刷新 DOM。需要刷新页面或强制重建组件才生效。复杂循环场景（`el-table-column` 操作列等）须使用 `checkPermi` + `v-if` 替代指令 | 权限变更场景 |
-| **MyBatis-Plus Boot 4 适配** | Boot 4 为极新版本，需确认 MyBatis-Plus 官方 `mybatis-plus-spring-boot4-starter` 对 Jakarta 命名空间的完整支持，建议锁定稳定版 | 构建与启动 |
+| **MyBatis-Plus Boot 4 适配** | 使用 `mybatis-plus-spring-boot4-starter` 3.5.17+，构建时通过 Maven 锁定版本并执行启动/CRUD/分页集成测试；若未来升级版本，必须单独回归验证 | 构建与启动 |
 | **CORS 白名单** | `CorsConfigure` 中的 `allowedOriginPatterns` 需在部署时根据实际域名修改，开发环境使用 `localhost:*` | 部署配置 |
