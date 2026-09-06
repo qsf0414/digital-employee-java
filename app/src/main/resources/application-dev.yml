@@ -1,0 +1,7 @@
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:4173
+
+logging:
+  level:
+    com.digital.employee: DEBUG
+    cn.dev33.satoken: DEBUG

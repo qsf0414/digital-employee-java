@@ -1,0 +1,15 @@
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 604800
+  active-timeout: 1800
+  is-concurrent: false
+  is-share: false
+  token-style: random-64
+  is-read-cookie: false
+  is-log: false
