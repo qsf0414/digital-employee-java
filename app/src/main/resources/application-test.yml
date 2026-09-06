@@ -1,4 +1,9 @@
 spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - cn.dev33.satoken.dao.SaTokenDaoForRedisTemplate
   datasource:
     driver-class-name: org.h2.Driver
     url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
@@ -6,14 +11,21 @@ spring:
     password:
   flyway:
     enabled: false
-  data:
-    redis:
-      host: localhost
-      port: 6379
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
 
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+initial:
+  admin:
+    enabled: false
+    username: admin
+    password: Test@12345
 
 logging:
   level:
