@@ -250,6 +250,17 @@ sequenceDiagram
     </dependency>
 
     <!--
+        flyway-database-postgresql
+        Flyway 数据库迁移引擎的 PostgreSQL 方言支持。
+        表结构 SQL 存放于 src/main/resources/db/migration/（见 §2.5 目录结构）。
+        驱动版本由 Boot Parent BOM 统一管理，无需显式声明 <version>。
+    -->
+    <dependency>
+        <groupId>org.flywaydb</groupId>
+        <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!--
         HikariCP（Spring Boot 默认连接池，无需额外引入依赖）
         选用理由：
         ① Spring Boot 4 自动装配 HikariCP，引入 spring-boot-starter-jdbc 或
@@ -358,6 +369,7 @@ public class Result<T> {
         return r;
     }
 }
+```
 
 **2. Redis Key 常量管理 (`RedisConstants.java`)**
 
@@ -398,6 +410,7 @@ public final class RedisConstants {
 ```java
 package com.digital.employee.system.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
@@ -409,14 +422,17 @@ import java.util.List;
 @Configuration
 public class CorsConfigure {
 
+    /**
+     * 允许的跨域 Origin。开发默认 localhost:5173/4173；
+     * 生产环境必须通过环境变量 CORS_ALLOWED_ORIGINS 注入真实域名，禁止使用任意通配。
+     */
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:4173}")
+    private String[] allowedOrigins;
+
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        // 生产环境必须通过配置注入明确 Origin，禁止使用任意通配。
-        config.setAllowedOrigins(List.of(
-                "http://localhost:5173",
-                "http://localhost:4173"
-        ));
+        config.setAllowedOrigins(List.of(allowedOrigins));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
         // 当前采用 Authorization Bearer，不依赖 Cookie，因此关闭 credentials。
@@ -489,6 +505,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class StpInterfaceImpl implements StpInterface {
 
+    /** 空权限占位符：表示该角色在数据库中没有任何权限码，写入缓存用于防缓存穿透。该值仅作数据哨兵，绝不是合法的业务权限码。 */
     private static final String EMPTY_FLAG = ":empty:";
     private static final String LOCK_PREFIX = "lock:role:perms:";
     private static final long LOCK_TIMEOUT_SECONDS = 5;
@@ -677,6 +694,8 @@ public class LoginRateLimiter {
 ```
 
 > **调用位置**：在 `AuthController.login()` 方法最前部调用 `loginRateLimiter.isAllowed(ip, username)`，返回 `false` 时直接响应 `429 TOO_MANY_REQUESTS`，**不进入密码校验流程**。BCrypt `matches()` 单次耗时约 80-120ms，若被恶意遍历将严重消耗 CPU 线程池。
+>
+> **单测注意事项（短路求值语义）**：`isAllowed()` 内部由 `if (isBlocked(IP桶))` 短路返回 `false`，以 `return !isBlocked(IPACCT桶)` 收尾。正常情况下单次登录请求会**同时递增** IP 桶与 IP:账号桶（双桶联合防御）；但**当 IP 桶已经命中限流（`isBlocked(IP桶)==true`）时，Java 短路求值会直接返回，第二个 IP:账号桶不会被调用、计数不会递增**。这与"IP 达限则账号维度一并封禁"的设计意图一致。编写单测时须覆盖该短路分支：构造 IP 桶超限场景，断言 `isBlocked(IPACCT桶)` 未被调用、其计数保持原值——切勿在随后用例中误以为两个桶计数始终同步。
 
 **8. 全局异常细分映射 (`GlobalExceptionHandler.java`)**
 
@@ -864,9 +883,16 @@ CREATE INDEX idx_audit_log_created ON sys_audit_log(created_at);
 
 ```mermaid
 erDiagram
-    SYS_USER }o--|| SYS_ROLE : "绑定"
+    SYS_ROLE ||--o{ SYS_USER : "拥有"
     SYS_ROLE ||--o{ SYS_ROLE_MENU : "授权"
     SYS_MENU ||--o{ SYS_ROLE_MENU : "归属"
+
+    SYS_ROLE {
+        BIGSERIAL id PK
+        VARCHAR role_key UK
+        VARCHAR role_name
+        SMALLINT status
+    }
 
     SYS_USER {
         BIGSERIAL id PK
@@ -877,13 +903,6 @@ erDiagram
         BIGINT role_id FK
         SMALLINT status
         BOOLEAN must_change_password
-    }
-
-    SYS_ROLE {
-        BIGSERIAL id PK
-        VARCHAR role_key UK
-        VARCHAR role_name
-        SMALLINT status
     }
 
     SYS_MENU {
@@ -897,6 +916,11 @@ erDiagram
         VARCHAR icon
         INT sort_order
         SMALLINT visible
+    }
+
+    SYS_ROLE_MENU {
+        BIGINT role_id PK, FK
+        BIGINT menu_id PK, FK
     }
 ```
 
