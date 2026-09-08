@@ -35,7 +35,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleException(Exception e) {
+        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class)
+                .error("系统内部错误", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Result.fail("SYSTEM_ERROR", "系统内部错误"));
+                .body(Result.fail("SYSTEM_ERROR", "系统内部错误: " + e.getMessage()));
     }
 }

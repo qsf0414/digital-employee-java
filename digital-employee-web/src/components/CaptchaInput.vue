@@ -23,13 +23,13 @@ function handleInput(value: string): void {
       prefix-icon="Key"
       @update:model-value="handleInput"
     />
-    <img
-      class="captcha-input__image"
-      :src="captchaImage"
-      alt="验证码"
+    <div
+      class="captcha-input__text"
       title="点击刷新"
       @click="emit('refresh')"
-    />
+    >
+      {{ captchaImage }}
+    </div>
   </div>
 </template>
 
@@ -43,13 +43,30 @@ function handleInput(value: string): void {
     flex: 1;
   }
 
-  &__image {
-    width: 120px;
+  &__text {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
     height: 40px;
+    padding: 0 12px;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    color: #333;
+    letter-spacing: 2px;
+    background: linear-gradient(135deg, #f5f5f5, #e8e8e8);
+    border: 1px solid #dcdfe6;
     border-radius: 4px;
     cursor: pointer;
-    border: 1px solid $color-border;
-    object-fit: cover;
+    user-select: none;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0, 0, 0, 0.03) 3px,
+      rgba(0, 0, 0, 0.03) 6px
+    );
   }
 }
 </style>

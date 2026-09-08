@@ -100,3 +100,14 @@ credentials.json
 # 敏感文档
 # ========================
 docs/密码.md
+
+# ========================
+# Remote environment config (contains credentials)
+# ========================
+application-remote.yml
+
+# ========================
+# Temp / Debug
+# ========================
+temp/
+debug_output.txt
