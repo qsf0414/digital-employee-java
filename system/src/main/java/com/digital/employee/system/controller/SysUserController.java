@@ -7,6 +7,7 @@ import com.digital.employee.system.domain.dto.UserCreateDTO;
 import com.digital.employee.system.domain.dto.UserUpdateDTO;
 import com.digital.employee.system.domain.entity.SysUser;
 import com.digital.employee.system.service.ISysUserService;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,6 +25,7 @@ public class SysUserController {
     }
 
     @GetMapping("/page")
+    @SaCheckPermission("admin:user:readonly")
     @Operation(summary = "分页查询用户")
     public Result<Page<SysUser>> page(
             @RequestParam(defaultValue = "1") int page,
@@ -33,6 +35,7 @@ public class SysUserController {
     }
 
     @GetMapping("/{id}")
+    @SaCheckPermission("admin:user:readonly")
     @Operation(summary = "查询用户详情")
     public Result<SysUser> getById(@PathVariable Long id) {
         SysUser user = userService.getById(id);
@@ -44,6 +47,7 @@ public class SysUserController {
     }
 
     @PostMapping
+    @SaCheckPermission("admin:user:manage")
     @Operation(summary = "创建用户")
     public Result<Void> create(@RequestBody @Valid UserCreateDTO dto) {
         SysUser existing = userService.getByUsername(dto.getUsername());
@@ -60,6 +64,7 @@ public class SysUserController {
     }
 
     @PutMapping
+    @SaCheckPermission("admin:user:manage")
     @Operation(summary = "更新用户")
     public Result<Void> update(@RequestBody @Valid UserUpdateDTO dto) {
         SysUser user = userService.getById(dto.getId());
@@ -75,6 +80,7 @@ public class SysUserController {
     }
 
     @DeleteMapping("/{id}")
+    @SaCheckPermission("admin:user:manage")
     @Operation(summary = "删除用户")
     public Result<Void> delete(@PathVariable Long id) {
         SysUser user = userService.getById(id);
@@ -86,6 +92,7 @@ public class SysUserController {
     }
 
     @PutMapping("/{id}/reset-password")
+    @SaCheckPermission("admin:user:manage")
     @Operation(summary = "重置用户密码")
     public Result<Void> resetPassword(@PathVariable Long id) {
         SysUser user = userService.getById(id);

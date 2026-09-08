@@ -1,5 +1,6 @@
 package com.digital.employee.system.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.digital.employee.common.core.Result;
@@ -32,6 +33,7 @@ public class SysRoleController {
     }
 
     @GetMapping("/page")
+    @SaCheckPermission("admin:permission:readonly")
     @Operation(summary = "分页查询角色")
     public Result<Page<SysRole>> page(
             @RequestParam(defaultValue = "1") int page,
@@ -42,6 +44,7 @@ public class SysRoleController {
     }
 
     @GetMapping("/{id}")
+    @SaCheckPermission("admin:permission:readonly")
     @Operation(summary = "查询角色详情")
     public Result<SysRole> getById(@PathVariable Long id) {
         SysRole role = roleService.getById(id);
@@ -52,6 +55,7 @@ public class SysRoleController {
     }
 
     @PostMapping
+    @SaCheckPermission("admin:permission:manage")
     @Transactional(rollbackFor = Exception.class)
     @Operation(summary = "创建角色")
     public Result<Void> create(@RequestBody @Valid RoleCreateDTO dto) {
@@ -76,11 +80,12 @@ public class SysRoleController {
             }
         }
 
-        roleService.incrementRoleVersion(dto.getRoleKey());
+        roleService.incrementRoleVersionAfterCommit(dto.getRoleKey());
         return Result.success();
     }
 
     @PutMapping
+    @SaCheckPermission("admin:permission:manage")
     @Transactional(rollbackFor = Exception.class)
     @Operation(summary = "更新角色")
     public Result<Void> update(@RequestBody @Valid RoleUpdateDTO dto) {
@@ -101,13 +106,14 @@ public class SysRoleController {
                 rm.setMenuId(menuId);
                 roleMenuMapper.insert(rm);
             }
-            roleService.incrementRoleVersion(role.getRoleKey());
+            roleService.incrementRoleVersionAfterCommit(role.getRoleKey());
         }
 
         return Result.success();
     }
 
     @DeleteMapping("/{id}")
+    @SaCheckPermission("admin:permission:manage")
     @Transactional(rollbackFor = Exception.class)
     @Operation(summary = "删除角色")
     public Result<Void> delete(@PathVariable Long id) {
@@ -116,7 +122,7 @@ public class SysRoleController {
             throw new BusinessException("ROLE_NOT_FOUND", "角色不存在");
         }
         roleService.removeById(id);
-        roleService.incrementRoleVersion(role.getRoleKey());
+        roleService.incrementRoleVersionAfterCommit(role.getRoleKey());
         return Result.success();
     }
 }

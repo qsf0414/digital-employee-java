@@ -1,5 +1,6 @@
 package com.digital.employee.system.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.digital.employee.common.core.Result;
 import com.digital.employee.common.exception.BusinessException;
@@ -27,6 +28,7 @@ public class SysMenuController {
     }
 
     @GetMapping("/tree")
+    @SaCheckPermission("admin:menu:readonly")
     @Operation(summary = "获取完整菜单树")
     public Result<List<Map<String, Object>>> tree() {
         List<SysMenu> menus = menuService.list(new LambdaQueryWrapper<SysMenu>()
@@ -36,6 +38,7 @@ public class SysMenuController {
     }
 
     @GetMapping("/list")
+    @SaCheckPermission("admin:menu:readonly")
     @Operation(summary = "获取全部菜单列表")
     public Result<List<SysMenu>> list() {
         return Result.success(menuService.list(new LambdaQueryWrapper<SysMenu>()
@@ -43,6 +46,7 @@ public class SysMenuController {
     }
 
     @GetMapping("/{id}")
+    @SaCheckPermission("admin:menu:readonly")
     @Operation(summary = "查询菜单详情")
     public Result<SysMenu> getById(@PathVariable Long id) {
         SysMenu menu = menuService.getById(id);
@@ -53,6 +57,7 @@ public class SysMenuController {
     }
 
     @PostMapping
+    @SaCheckPermission("admin:menu:manage")
     @Operation(summary = "创建菜单")
     public Result<Void> create(@RequestBody @Valid MenuCreateDTO dto) {
         SysMenu menu = new SysMenu();
@@ -70,6 +75,7 @@ public class SysMenuController {
     }
 
     @PutMapping
+    @SaCheckPermission("admin:menu:manage")
     @Operation(summary = "更新菜单")
     public Result<Void> update(@RequestBody SysMenu menu) {
         if (menu.getId() == null) {
@@ -80,6 +86,7 @@ public class SysMenuController {
     }
 
     @DeleteMapping("/{id}")
+    @SaCheckPermission("admin:menu:manage")
     @Operation(summary = "删除菜单")
     public Result<Void> delete(@PathVariable Long id) {
         menuService.removeById(id);

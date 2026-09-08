@@ -1,10 +1,11 @@
 package com.digital.employee.system.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.digital.employee.common.redis.RedisConstants;
 import com.digital.employee.system.domain.entity.SysRole;
+import com.digital.employee.system.domain.entity.SysUser;
 import com.digital.employee.system.mapper.SysRoleMapper;
+import com.digital.employee.system.mapper.SysUserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +28,9 @@ class SysRoleServiceImplTest {
     private SysRoleMapper roleMapper;
 
     @Mock
+    private SysUserMapper userMapper;
+
+    @Mock
     private StringRedisTemplate redisTemplate;
 
     @Mock
@@ -36,6 +40,7 @@ class SysRoleServiceImplTest {
     private SysRoleServiceImpl roleService;
 
     private SysRole sampleRole;
+    private SysUser sampleUser;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -45,23 +50,40 @@ class SysRoleServiceImplTest {
         sampleRole.setRoleKey("super_admin");
         sampleRole.setRoleName("超级管理员");
         sampleRole.setStatus(1);
+
+        sampleUser = new SysUser();
+        sampleUser.setId(10L);
+        sampleUser.setUsername("admin");
+        sampleUser.setRoleId(1L);
+        sampleUser.setStatus(1);
     }
 
     @Test
     void getRoleByUserIdShouldReturnRole() {
-        when(roleMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(sampleRole);
+        when(userMapper.selectById(10L)).thenReturn(sampleUser);
+        when(roleMapper.selectById(1L)).thenReturn(sampleRole);
 
-        SysRole result = roleService.getRoleByUserId(1L);
+        SysRole result = roleService.getRoleByUserId(10L);
 
         assertNotNull(result);
         assertEquals("super_admin", result.getRoleKey());
     }
 
     @Test
-    void getRoleByUserIdShouldReturnNullWhenNotFound() {
-        when(roleMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+    void getRoleByUserIdShouldReturnNullWhenUserNotFound() {
+        when(userMapper.selectById(999L)).thenReturn(null);
 
         SysRole result = roleService.getRoleByUserId(999L);
+
+        assertNull(result);
+    }
+
+    @Test
+    void getRoleByUserIdShouldReturnNullWhenRoleNotFound() {
+        when(userMapper.selectById(10L)).thenReturn(sampleUser);
+        when(roleMapper.selectById(1L)).thenReturn(null);
+
+        SysRole result = roleService.getRoleByUserId(10L);
 
         assertNull(result);
     }

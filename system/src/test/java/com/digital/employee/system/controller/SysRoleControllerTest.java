@@ -85,7 +85,7 @@ class SysRoleControllerTest {
         var result = roleController.create(dto);
 
         assertEquals("OK", result.getCode());
-        verify(roleService, times(1)).incrementRoleVersion("editor");
+        verify(roleService, times(1)).incrementRoleVersionAfterCommit("editor");
     }
 
     @Test
@@ -114,7 +114,7 @@ class SysRoleControllerTest {
 
         assertEquals("OK", result.getCode());
         verify(roleMenuMapper).deleteByRoleId(1L);
-        verify(roleService).incrementRoleVersion("admin");
+        verify(roleService).incrementRoleVersionAfterCommit("admin");
     }
 
     @Test
@@ -125,7 +125,7 @@ class SysRoleControllerTest {
         var result = roleController.delete(1L);
 
         assertEquals("OK", result.getCode());
-        verify(roleService).incrementRoleVersion("admin");
+        verify(roleService).incrementRoleVersionAfterCommit("admin");
     }
 
     @Test

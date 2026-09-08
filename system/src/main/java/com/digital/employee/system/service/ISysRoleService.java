@@ -8,4 +8,6 @@ public interface ISysRoleService extends IService<SysRole> {
     SysRole getRoleByUserId(Long userId);
 
     void incrementRoleVersion(String roleKey);
+
+    void incrementRoleVersionAfterCommit(String roleKey);
 }
