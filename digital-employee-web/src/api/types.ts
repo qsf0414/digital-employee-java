@@ -85,3 +85,48 @@ export interface ISysMenu {
   visible: number;
   createdAt: string;
 }
+
+export interface ISysMenuTreeNode extends ISysMenu {
+  children: ISysMenuTreeNode[];
+}
+
+export interface UserCreateDTO {
+  username: string;
+  password: string;
+  nickname: string;
+  phone?: string;
+  roleId: number;
+}
+
+export interface UserUpdateDTO {
+  id: number;
+  nickname: string;
+  phone?: string;
+  roleId: number;
+  status: number;
+}
+
+export interface RoleCreateDTO {
+  roleKey: string;
+  roleName: string;
+  menuIds: number[];
+}
+
+export interface RoleUpdateDTO {
+  id: number;
+  roleName: string;
+  status: number;
+  menuIds: number[];
+}
+
+export interface MenuCreateDTO {
+  parentId: number;
+  title: string;
+  menuType: string;
+  path?: string;
+  component?: string;
+  perms?: string;
+  icon?: string;
+  sortOrder: number;
+  visible: number;
+}
